@@ -130,18 +130,38 @@ function sync_zabbix_users() {
                 $z_user['userid']
             ]);
         } else {
-            $insert_stmt = $oncall_db->prepare("
-                INSERT INTO users (zabbix_userid, username, name, surname, email)
-                VALUES (?, ?, ?, ?, ?)
-            ");
-            $insert_stmt->execute([
-                $z_user['userid'],
-                $email, // Use full email for username to align with Azure AD
-                $z_user['name'],
-                $z_user['surname'],
-                $email
-            ]);
-            $synced_count++;
+            // Try to match to an SSO auto provisioned user by username (email)
+            $check_by_username_stmt = $oncall_db->prepare("SELECT id FROM users WHERE username = ?");
+            $check_by_username_stmt->execute([$email]);
+            $existing_by_username = $check_by_username_stmt->fetch();
+
+            if ($existing_by_username) {
+                // Match found! Update their zabbix_userid, name, surname, and keep username as email
+                $update_stmt = $oncall_db->prepare("
+                    UPDATE users
+                    SET zabbix_userid = ?, name = ?, surname = ?
+                    WHERE id = ?
+                ");
+                $update_stmt->execute([
+                    $z_user['userid'],
+                    $z_user['name'],
+                    $z_user['surname'],
+                    $existing_by_username['id']
+                ]);
+            } else {
+                $insert_stmt = $oncall_db->prepare("
+                    INSERT INTO users (zabbix_userid, username, name, surname, email)
+                    VALUES (?, ?, ?, ?, ?)
+                ");
+                $insert_stmt->execute([
+                    $z_user['userid'],
+                    $email, // Use full email for username to align with Azure AD
+                    $z_user['name'],
+                    $z_user['surname'],
+                    $email
+                ]);
+                $synced_count++;
+            }
         }
     }
 

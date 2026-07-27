@@ -93,6 +93,7 @@ class Auth
      * ========================================================= */
     private function syncUser(string $azureOid, string $email, string $name): int
     {
+        // 1. Try to find user by azure_oid
         $stmt = $this->db->prepare("SELECT id FROM users WHERE azure_oid = ?");
         $stmt->execute([$azureOid]);
         $user = $stmt->fetch();
@@ -108,6 +109,23 @@ class Auth
             return (int)$user['id'];
         }
 
+        // 2. Try to find user by username (email) which might be pre-created by Zabbix sync
+        $stmt = $this->db->prepare("SELECT id FROM users WHERE username = ?");
+        $stmt->execute([$email]);
+        $user = $stmt->fetch();
+
+        if ($user) {
+            $stmt = $this->db->prepare("
+                UPDATE users
+                SET azure_oid = ?, email = ?, display_name = ?, last_login = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([$azureOid, $email, $name, $user['id']]);
+
+            return (int)$user['id'];
+        }
+
+        // 3. Otherwise, auto-provision a new user
         $stmt = $this->db->prepare("
             INSERT INTO users (azure_oid, username, email, display_name, auto_provisioned, last_login)
             VALUES (?, ?, ?, ?, 1, NOW())
