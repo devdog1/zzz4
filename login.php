@@ -1,5 +1,5 @@
 <?php
-// login.php - Login selection (Azure AD & Developer Bypass)
+// login.php - Login selection (Azure AD)
 require_once 'models.php';
 require_once 'Auth.php';
 
@@ -13,61 +13,6 @@ if (isset($_SESSION['user_id'])) {
 
 $error = '';
 
-// Handle Mock Login Submission
-if (isset($_POST['mock_login'])) {
-    $user_id = (int)($_POST['user_id'] ?? 0);
-    $selected_role = $_POST['role'] ?? 'user';
-
-    $user = get_user_by_id($user_id);
-    if ($user) {
-        $db = get_oncall_db();
-
-        // Ensure the selected role exists and assign it
-        $stmt = $db->prepare("SELECT id FROM roles WHERE role_name = ?");
-        $stmt->execute([$selected_role]);
-        $role = $stmt->fetch();
-
-        if ($role) {
-            // Delete existing roles to prevent collision, and assign selected
-            $stmt = $db->prepare("DELETE FROM user_roles WHERE user_id = ?");
-            $stmt->execute([$user['id']]);
-
-            $stmt = $db->prepare("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)");
-            $stmt->execute([$user['id'], $role['id']]);
-        }
-
-        // Setup session
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['user'] = [
-            'azure_oid' => $user['azure_oid'] ?: 'mock_oid_' . $user['id'],
-            'email'     => $user['email'],
-            'name'      => $user['name'] . ' ' . $user['surname'],
-            'groups'    => []
-        ];
-
-        $_SESSION['roles'] = $auth->getUserRoles($user['id']);
-        // Cache roles associative for easy lookup
-        $roles_assoc = [];
-        foreach ($_SESSION['roles'] as $r) {
-            $roles_assoc[$r] = true;
-        }
-        $_SESSION['roles'] = $roles_assoc;
-
-        $_SESSION['permissions'] = $auth->getPermissions($user['id'], []);
-
-        log_action('MOCK_LOGIN', [
-            'user_id' => $user['id'],
-            'username' => $user['username'],
-            'role' => $selected_role
-        ]);
-
-        header("Location: index.php");
-        exit;
-    } else {
-        $error = 'Invalid user selected.';
-    }
-}
-
 // Handle real Azure AD login redirect
 if (isset($_POST['azure_login'])) {
     try {
@@ -76,8 +21,6 @@ if (isset($_POST['azure_login'])) {
         $error = "Azure Login failed to initiate: " . $e->getMessage();
     }
 }
-
-$users = get_all_users();
 ?>
 <!DOCTYPE html>
 <html lang="en">
