@@ -101,7 +101,11 @@ function get_current_on_call($department_id, $now) {
                                         </div>
                                     </div>
                                     <ul class="list-unstyled mt-3 mb-0 small text-muted">
-                                        <li><i class="fa-solid fa-envelope me-2"></i> <?= htmlspecialchars($current['username'] . '@example.com') ?></li>
+                                        <?php
+                                        $curr_user = get_user_by_id($current['user_id']);
+                                        $email_display = ($curr_user && $curr_user['email']) ? $curr_user['email'] : ($current['username'] . '@' . get_setting('zabbix_default_domain', 'example.com'));
+                                        ?>
+                                        <li><i class="fa-solid fa-envelope me-2"></i> <?= htmlspecialchars($email_display) ?></li>
                                         <li><i class="fa-solid fa-calendar-day me-2"></i> Shift: <?= date('M d, H:i', $current['start']) ?> &rarr; <?= date('M d, H:i', $current['end']) ?></li>
                                         <?php if ($is_override && !empty($current['description'])): ?>
                                             <li class="text-warning"><i class="fa-solid fa-tag me-2"></i> Reason: <?= htmlspecialchars($current['description']) ?></li>

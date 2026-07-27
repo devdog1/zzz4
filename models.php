@@ -83,6 +83,19 @@ function require_login() {
 }
 
 
+function get_setting($key, $default = null) {
+    try {
+        $db = get_oncall_db();
+        $stmt = $db->prepare("SELECT setting_value FROM settings WHERE setting_key = ?");
+        $stmt->execute([$key]);
+        $row = $stmt->fetch();
+        return $row ? $row['setting_value'] : $default;
+    } catch (Exception $e) {
+        return $default;
+    }
+}
+
+
 // --- ZABBIX USER SYNC ---
 
 function sync_zabbix_users() {
@@ -94,6 +107,8 @@ function sync_zabbix_users() {
     $zabbix_users = $stmt->fetchAll();
 
     $synced_count = 0;
+    $domain = get_setting('zabbix_default_domain', 'example.com');
+
     foreach ($zabbix_users as $z_user) {
         $check_stmt = $oncall_db->prepare("SELECT id FROM users WHERE zabbix_userid = ?");
         $check_stmt->execute([$z_user['userid']]);
@@ -112,7 +127,7 @@ function sync_zabbix_users() {
                 $z_user['userid']
             ]);
         } else {
-            $email = $z_user['username'] . '@example.com';
+            $email = $z_user['username'] . '@' . $domain;
             $insert_stmt = $oncall_db->prepare("
                 INSERT INTO users (zabbix_userid, username, name, surname, email)
                 VALUES (?, ?, ?, ?, ?)
