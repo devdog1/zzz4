@@ -114,27 +114,29 @@ function sync_zabbix_users() {
         $check_stmt->execute([$z_user['userid']]);
         $existing = $check_stmt->fetch();
 
+        $email = $z_user['username'] . '@' . $domain;
+
         if ($existing) {
             $update_stmt = $oncall_db->prepare("
                 UPDATE users
-                SET username = ?, name = ?, surname = ?
+                SET username = ?, name = ?, surname = ?, email = ?
                 WHERE zabbix_userid = ?
             ");
             $update_stmt->execute([
-                $z_user['username'],
+                $email, // Use full email for username to align with Azure AD
                 $z_user['name'],
                 $z_user['surname'],
+                $email,
                 $z_user['userid']
             ]);
         } else {
-            $email = $z_user['username'] . '@' . $domain;
             $insert_stmt = $oncall_db->prepare("
                 INSERT INTO users (zabbix_userid, username, name, surname, email)
                 VALUES (?, ?, ?, ?, ?)
             ");
             $insert_stmt->execute([
                 $z_user['userid'],
-                $z_user['username'],
+                $email, // Use full email for username to align with Azure AD
                 $z_user['name'],
                 $z_user['surname'],
                 $email
