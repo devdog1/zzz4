@@ -5,7 +5,7 @@ require_once 'models.php';
 
 // Only admins can view/manage department creation/deletion
 // Managers can only manage membership for their assigned departments
-if (!is_admin() && empty(get_all_departments())) {
+if (!has_permission('manage_departments') && empty(get_all_departments())) {
     echo "<div class='alert alert-danger'>Access Denied: Only Administrators can create or manage departments.</div>";
     require_once 'footer.php';
     exit;
@@ -16,7 +16,7 @@ $error = '';
 
 // Handle creating department (Admin only)
 if (isset($_POST['create_dept'])) {
-    if (!is_admin()) {
+    if (!has_permission('manage_departments')) {
         $error = 'Unauthorized: Only Administrators can create departments.';
     } else {
         $name = trim($_POST['name'] ?? '');
@@ -37,7 +37,7 @@ if (isset($_POST['create_dept'])) {
 
 // Handle updating department manager (Admin only)
 if (isset($_POST['update_manager'])) {
-    if (!is_admin()) {
+    if (!has_permission('manage_departments')) {
         $error = 'Unauthorized: Only Administrators can assign managers.';
     } else {
         $dept_id = (int)$_POST['dept_id'];
@@ -53,7 +53,7 @@ if (isset($_POST['update_manager'])) {
 
 // Handle deleting department (Admin only)
 if (isset($_GET['delete_id'])) {
-    if (!is_admin()) {
+    if (!has_permission('manage_departments')) {
         $error = 'Unauthorized: Only Administrators can delete departments.';
     } else {
         $delete_id = (int)$_GET['delete_id'];
@@ -188,7 +188,7 @@ if ($manage_id) {
                                                 </button>
                                             <?php endif; ?>
 
-                                            <?php if (is_admin()): ?>
+                                            <?php if (has_permission('manage_departments')): ?>
                                                 <a href="departments.php?delete_id=<?= $dept['id'] ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this department?');">
                                                     <i class="fa-solid fa-trash"></i>
                                                 </a>
@@ -249,7 +249,7 @@ if ($manage_id) {
             </div>
 
             <!-- Manager reassignment section (Admin only) -->
-            <?php if (is_admin()): ?>
+            <?php if (has_permission('manage_departments')): ?>
                 <div class="card mt-3">
                     <div class="card-header bg-white fw-bold text-dark">
                         <i class="fa-solid fa-user-tie me-2 text-primary"></i>Assign Group Manager
@@ -278,7 +278,7 @@ if ($manage_id) {
 
         <?php else: ?>
             <!-- Create Department Form (Admin Only) -->
-            <?php if (is_admin()): ?>
+            <?php if (has_permission('manage_departments')): ?>
                 <div class="card">
                     <div class="card-header bg-white">
                         <i class="fa-solid fa-folder-plus me-2 text-success"></i>Create Department

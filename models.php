@@ -53,8 +53,14 @@ function get_audit_logs($limit = 200) {
 
 // --- AUTH & PERMISSION CHECKS ---
 
-function is_admin() {
-    return isset($_SESSION['roles']['admin']) && $_SESSION['roles']['admin'] === true;
+function has_permission($permission) {
+    global $auth;
+    if (!isset($auth)) {
+        require_once 'Auth.php';
+        $config = require 'config.php';
+        $auth = new Auth($config);
+    }
+    return $auth->hasPermission($permission);
 }
 
 function is_department_manager($department_id) {
@@ -66,7 +72,7 @@ function is_department_manager($department_id) {
 }
 
 function can_manage_department($department_id) {
-    return is_admin() || is_department_manager($department_id);
+    return has_permission('manage_departments') || is_department_manager($department_id);
 }
 
 function require_login() {

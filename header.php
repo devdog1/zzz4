@@ -81,7 +81,7 @@ $user_roles_str = implode(', ', array_map('ucfirst', $user_roles));
                 <li class="nav-item">
                     <a class="nav-link" href="overrides.php"><i class="fa-solid fa-circle-exclamation me-1"></i> Overrides</a>
                 </li>
-                <?php if (is_admin()): ?>
+                <?php if (has_permission('manage_departments')): ?>
                     <li class="nav-item">
                         <a class="nav-link" href="departments.php"><i class="fa-solid fa-sitemap me-1"></i> Departments</a>
                     </li>

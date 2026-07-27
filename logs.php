@@ -4,7 +4,7 @@ require_once 'header.php';
 require_once 'models.php';
 
 // Access Control: Only Global Administrators can view audit logs
-if (!is_admin()) {
+if (!has_permission('manage_departments')) {
     echo "<div class='alert alert-danger p-4'><i class='fa-solid fa-circle-exclamation me-2'></i>Access Denied: Only Global Administrators are authorized to view the system audit trail.</div>";
     require_once 'footer.php';
     exit;

@@ -4,7 +4,7 @@ require_once 'header.php';
 require_once 'models.php';
 
 // Access Control: Only Global Administrators can access sync.php
-if (!is_admin()) {
+if (!has_permission('manage_departments')) {
     echo "<div class='alert alert-danger p-4'><i class='fa-solid fa-circle-exclamation me-2'></i>Access Denied: Only Global Administrators can access the Zabbix synchronization portal.</div>";
     require_once 'footer.php';
     exit;

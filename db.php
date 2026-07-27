@@ -2,9 +2,10 @@
 // db.php - Database connection helpers
 
 function get_db_connection($dbname) {
-    $host = '127.0.0.1';
-    $user = 'oncall_user';
-    $pass = 'oncall_pass';
+    $config = require 'config.php';
+    $host = $config['db']['local']['dbhost'] ?? '127.0.0.1';
+    $user = $config['db']['local']['dbuser'] ?? 'oncall_user';
+    $pass = $config['db']['local']['dbpass'] ?? 'oncall_pass';
     $charset = 'utf8mb4';
 
     $dsn = "mysql:host=$host;dbname=$dbname;charset=$charset";

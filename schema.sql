@@ -86,14 +86,14 @@ CREATE TABLE IF NOT EXISTS overrides (
 -- RBAC Tables for AzureADSSO & Auth.php
 CREATE TABLE IF NOT EXISTS roles (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(50) NOT NULL UNIQUE,
+    role_name VARCHAR(50) NOT NULL UNIQUE,
     description VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS permissions (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE,
+    permission_name VARCHAR(100) NOT NULL UNIQUE,
     description VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -113,9 +113,9 @@ CREATE TABLE IF NOT EXISTS default_roles (
 );
 
 CREATE TABLE IF NOT EXISTS azure_group_roles (
-    azure_group_id VARCHAR(255) NOT NULL,
+    azure_group_name VARCHAR(255) NOT NULL,
     role_id INT NOT NULL,
-    PRIMARY KEY (azure_group_id, role_id),
+    PRIMARY KEY (azure_group_name, role_id),
     FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
 );
 
@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS trade_requests (
     department_id INT NOT NULL,
     proposing_user_id INT NOT NULL,
     accepting_user_id INT DEFAULT NULL,
-    proposing_slot_id INT NOT NULL,
+    offered_slot_id INT NOT NULL,
     counter_slot_id INT DEFAULT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'open', -- 'open', 'offered', 'agreed', 'approved', 'rejected'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS trade_requests (
     FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
     FOREIGN KEY (proposing_user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (accepting_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (proposing_slot_id) REFERENCES schedule_slots(id) ON DELETE CASCADE,
+    FOREIGN KEY (offered_slot_id) REFERENCES schedule_slots(id) ON DELETE CASCADE,
     FOREIGN KEY (counter_slot_id) REFERENCES schedule_slots(id) ON DELETE CASCADE
 );
 
@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS trade_requests (
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT DEFAULT NULL,
+    username VARCHAR(100) DEFAULT NULL,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     action VARCHAR(100) NOT NULL,
     details TEXT,
@@ -173,12 +174,12 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- Insert Roles & Basic Permissions
-INSERT IGNORE INTO roles (id, name, description) VALUES
+INSERT IGNORE INTO roles (id, role_name, description) VALUES
 (1, 'admin', 'Global Administrator with full rights'),
 (2, 'manager', 'Department manager with schedule management rights'),
 (3, 'user', 'Standard user / team member');
 
-INSERT IGNORE INTO permissions (id, name, description) VALUES
+INSERT IGNORE INTO permissions (id, permission_name, description) VALUES
 (1, 'manage_departments', 'Create or delete departments'),
 (2, 'manage_schedules', 'Generate schedules and overrides'),
 (3, 'view_schedules', 'View calendar and on-call schedules');
