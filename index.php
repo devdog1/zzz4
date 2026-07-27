@@ -202,15 +202,34 @@ function get_current_on_call($department_id, $now) {
                 <i class="fa-solid fa-bolt me-2"></i> Quick Actions
             </div>
             <div class="list-group list-group-flush">
-                <a href="generate.php" class="list-group-item list-group-item-action">
-                    <i class="fa-solid fa-calendar-plus text-primary me-2"></i> Generate 365-Day Schedule
-                </a>
-                <a href="overrides.php?action=new" class="list-group-item list-group-item-action">
-                    <i class="fa-solid fa-clock-rotate-left text-warning me-2"></i> Create Manual Override
-                </a>
-                <a href="sync.php" class="list-group-item list-group-item-action">
-                    <i class="fa-solid fa-arrows-rotate text-success me-2"></i> Sync Users from Zabbix
-                </a>
+                <?php
+                $current_user_id = $_SESSION['user_id'] ?? null;
+                $can_generate = false;
+                $can_override = false;
+                foreach ($departments as $d) {
+                    if (can_manage_department($d['id'])) {
+                        $can_generate = true;
+                    }
+                    if (can_user_create_override($d['id'], $current_user_id)) {
+                        $can_override = true;
+                    }
+                }
+                ?>
+                <?php if ($can_generate): ?>
+                    <a href="generate.php" class="list-group-item list-group-item-action">
+                        <i class="fa-solid fa-calendar-plus text-primary me-2"></i> Generate 365-Day Schedule
+                    </a>
+                <?php endif; ?>
+                <?php if ($can_override): ?>
+                    <a href="overrides.php?action=new" class="list-group-item list-group-item-action">
+                        <i class="fa-solid fa-clock-rotate-left text-warning me-2"></i> Create Manual Override
+                    </a>
+                <?php endif; ?>
+                <?php if (has_permission('manage_departments')): ?>
+                    <a href="sync.php" class="list-group-item list-group-item-action">
+                        <i class="fa-solid fa-arrows-rotate text-success me-2"></i> Sync Users from Zabbix
+                    </a>
+                <?php endif; ?>
                 <a href="calendar.php" class="list-group-item list-group-item-action">
                     <i class="fa-solid fa-calendar-days text-info me-2"></i> View Schedules Calendar
                 </a>

@@ -92,9 +92,21 @@ $user_roles_str = implode(', ', array_map('ucfirst', $user_roles));
                         <a class="nav-link" href="logs.php"><i class="fa-solid fa-receipt me-1"></i> Audit Trail</a>
                     </li>
                 <?php endif; ?>
-                <li class="nav-item">
-                    <a class="nav-link" href="generate.php"><i class="fa-solid fa-arrows-spin me-1"></i> Generate Rotation</a>
-                </li>
+                <?php
+                $header_depts = get_all_departments();
+                $can_generate_rotation = false;
+                foreach ($header_depts as $hd) {
+                    if (can_manage_department($hd['id'])) {
+                        $can_generate_rotation = true;
+                        break;
+                    }
+                }
+                ?>
+                <?php if ($can_generate_rotation): ?>
+                    <li class="nav-item">
+                        <a class="nav-link" href="generate.php"><i class="fa-solid fa-arrows-spin me-1"></i> Generate Rotation</a>
+                    </li>
+                <?php endif; ?>
             </ul>
 
             <?php if (isset($_SESSION['user_id'])): ?>
