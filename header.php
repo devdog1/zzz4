@@ -81,17 +81,6 @@ $user_roles_str = implode(', ', array_map('ucfirst', $user_roles));
                 <li class="nav-item">
                     <a class="nav-link" href="overrides.php"><i class="fa-solid fa-circle-exclamation me-1"></i> Overrides</a>
                 </li>
-                <?php if (has_permission('manage_departments')): ?>
-                    <li class="nav-item">
-                        <a class="nav-link" href="departments.php"><i class="fa-solid fa-sitemap me-1"></i> Departments</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="sync.php"><i class="fa-solid fa-users-gear me-1"></i> Sync & Users</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="logs.php"><i class="fa-solid fa-receipt me-1"></i> Audit Trail</a>
-                    </li>
-                <?php endif; ?>
                 <?php
                 $header_depts = get_all_departments();
                 $can_generate_rotation = false;
@@ -102,6 +91,19 @@ $user_roles_str = implode(', ', array_map('ucfirst', $user_roles));
                     }
                 }
                 ?>
+                <?php if (has_permission('manage_departments') || $can_generate_rotation): ?>
+                    <li class="nav-item">
+                        <a class="nav-link" href="departments.php"><i class="fa-solid fa-sitemap me-1"></i> Departments</a>
+                    </li>
+                <?php endif; ?>
+                <?php if (has_permission('manage_departments')): ?>
+                    <li class="nav-item">
+                        <a class="nav-link" href="sync.php"><i class="fa-solid fa-users-gear me-1"></i> Sync & Users</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="logs.php"><i class="fa-solid fa-receipt me-1"></i> Audit Trail</a>
+                    </li>
+                <?php endif; ?>
                 <?php if ($can_generate_rotation): ?>
                     <li class="nav-item">
                         <a class="nav-link" href="generate.php"><i class="fa-solid fa-arrows-spin me-1"></i> Generate Rotation</a>

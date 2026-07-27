@@ -5,8 +5,16 @@ require_once 'models.php';
 
 // Only admins can view/manage department creation/deletion
 // Managers can only manage membership for their assigned departments
-if (!has_permission('manage_departments') && empty(get_all_departments())) {
-    echo "<div class='alert alert-danger'>Access Denied: Only Administrators can create or manage departments.</div>";
+$current_user_id = $_SESSION['user_id'] ?? null;
+$my_managed_depts = [];
+foreach (get_all_departments() as $dept) {
+    if (can_manage_department($dept['id'])) {
+        $my_managed_depts[] = $dept;
+    }
+}
+
+if (!has_permission('manage_departments') && empty($my_managed_depts)) {
+    echo "<div class='alert alert-danger p-4'><i class='fa-solid fa-circle-exclamation me-2'></i>Access Denied: You do not have permission to view this page or you are not designated as a manager for any department.</div>";
     require_once 'footer.php';
     exit;
 }
