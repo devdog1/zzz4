@@ -11,8 +11,15 @@ $departments = get_all_departments();
 // Handle selection of department
 $dept_id = isset($_REQUEST['department_id']) ? (int)$_REQUEST['department_id'] : null;
 $dept_users = [];
+$is_authorized = false;
+
 if ($dept_id) {
-    $dept_users = get_department_users($dept_id);
+    if (can_manage_department($dept_id)) {
+        $is_authorized = true;
+        $dept_users = get_department_users($dept_id);
+    } else {
+        $error = 'Unauthorized: Only the designated Manager for this department or a Global Administrator can generate its schedule.';
+    }
 }
 
 // Handle generation form submission
@@ -21,7 +28,9 @@ if (isset($_POST['generate'])) {
     $included_users = $_POST['include_users'] ?? [];
     $user_orders = $_POST['user_order'] ?? [];
 
-    if (empty($start_date)) {
+    if (!$is_authorized) {
+        $error = 'Unauthorized action.';
+    } elseif (empty($start_date)) {
         $error = 'Please select a rotation start date.';
     } elseif (empty($included_users)) {
         $error = 'Please select at least one member for the rotation.';
@@ -103,7 +112,7 @@ if (isset($_POST['generate'])) {
     </div>
 
     <!-- Step 2: Configure Rotation Details -->
-    <?php if ($dept_id): ?>
+    <?php if ($dept_id && $is_authorized): ?>
         <div class="col-lg-8">
             <div class="card border-primary">
                 <div class="card-header bg-primary text-white">
@@ -190,8 +199,8 @@ if (isset($_POST['generate'])) {
         <div class="col-lg-8">
             <div class="alert alert-light border text-center p-5">
                 <i class="fa-solid fa-circle-info text-muted mb-3" style="font-size: 2.5rem;"></i>
-                <h5>Select a Department</h5>
-                <p class="text-muted">Please select a department from the panel on the left to configure and generate its 365-day rotation.</p>
+                <h5>Select an Authorized Department</h5>
+                <p class="text-muted">Please select a department from the panel on the left where you are the designated on-call group manager or an administrator.</p>
             </div>
         </div>
     <?php endif; ?>

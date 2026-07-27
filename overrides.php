@@ -21,11 +21,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $end_time = $_POST['end_time'] ?? '';
         $description = $_POST['description'] ?? '';
 
-        // Clean datetime format for mysql (replace 'T' from datetime-local input)
+        // Clean datetime format for mysql
         $start_time = str_replace('T', ' ', $start_time);
         $end_time = str_replace('T', ' ', $end_time);
 
-        if (!$dept_id || !$user_id || empty($start_time) || empty($end_time)) {
+        if (!can_manage_department($dept_id)) {
+            $error = 'Unauthorized: Only the designated Department Manager or Admin can create/edit overrides for this department.';
+        } elseif (!$dept_id || !$user_id || empty($start_time) || empty($end_time)) {
             $error = 'All fields except description are required.';
         } elseif (strtotime($end_time) <= strtotime($start_time)) {
             $error = 'End time must be after start time.';
@@ -49,11 +51,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Handle delete
 if ($action === 'delete' && $id) {
-    try {
-        delete_override($id);
-        $message = 'Manual override deleted successfully!';
-    } catch (Exception $e) {
-        $error = 'Failed to delete override: ' . $e->getMessage();
+    $override_data = get_override_by_id($id);
+    if ($override_data && !can_manage_department($override_data['department_id'])) {
+        $error = 'Unauthorized: Only the designated Department Manager or Admin can delete overrides.';
+    } else {
+        try {
+            delete_override($id);
+            $message = 'Manual override deleted successfully!';
+        } catch (Exception $e) {
+            $error = 'Failed to delete override: ' . $e->getMessage();
+        }
     }
     $action = 'list';
 }
@@ -65,6 +72,10 @@ if ($action === 'edit' && $id) {
     if (!$override_data) {
         $error = 'Override not found.';
         $action = 'list';
+    } elseif (!can_manage_department($override_data['department_id'])) {
+        $error = 'Unauthorized: You cannot edit this override.';
+        $action = 'list';
+        $override_data = null;
     }
 }
 
@@ -147,6 +158,7 @@ $overrides = get_overrides();
                                 } else {
                                     $status_badge = '<span class="badge bg-info text-dark small ms-2">UPCOMING</span>';
                                 }
+                                $can_edit = can_manage_department($ov['department_id']);
                                 ?>
                                 <tr>
                                     <td class="fw-bold">#<?= $ov['id'] ?></td>
@@ -168,12 +180,16 @@ $overrides = get_overrides();
                                         <span class="text-muted"><?= htmlspecialchars($ov['description'] ?: 'None provided') ?></span>
                                     </td>
                                     <td class="text-end">
-                                        <a href="overrides.php?action=edit&id=<?= $ov['id'] ?>" class="btn btn-sm btn-outline-primary me-1">
-                                            <i class="fa-solid fa-edit"></i>
-                                        </a>
-                                        <a href="overrides.php?action=delete&id=<?= $ov['id'] ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this override?');">
-                                            <i class="fa-solid fa-trash"></i>
-                                        </a>
+                                        <?php if ($can_edit): ?>
+                                            <a href="overrides.php?action=edit&id=<?= $ov['id'] ?>" class="btn btn-sm btn-outline-primary me-1">
+                                                <i class="fa-solid fa-edit"></i>
+                                            </a>
+                                            <a href="overrides.php?action=delete&id=<?= $ov['id'] ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this override?');">
+                                                <i class="fa-solid fa-trash"></i>
+                                            </a>
+                                        <?php else: ?>
+                                            <span class="badge bg-light text-muted"><i class="fa-solid fa-lock"></i> Locked</span>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>

@@ -2,6 +2,81 @@
 // models.php - Database Operations and Business Logic
 require_once 'db.php';
 
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// --- VERBOSE AUDIT LOGGING ---
+
+function log_action($action, $details) {
+    try {
+        $db = get_oncall_db();
+        $user_id = $_SESSION['user_id'] ?? null;
+        $username = null;
+        if ($user_id) {
+            $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
+            $stmt->execute([$user_id]);
+            $res = $stmt->fetch();
+            $username = $res ? $res['username'] : null;
+        }
+
+        $ip_address = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+
+        if (is_array($details) || is_object($details)) {
+            $details = json_encode($details, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+        }
+
+        $stmt = $db->prepare("
+            INSERT INTO audit_logs (user_id, username, action, details, ip_address)
+            VALUES (?, ?, ?, ?, ?)
+        ");
+        $stmt->execute([$user_id, $username, $action, $details, $ip_address]);
+    } catch (Exception $e) {
+        // Prevent logging errors from crashing the main application flow
+        error_log("Failed to write audit log: " . $e->getMessage());
+    }
+}
+
+function get_audit_logs($limit = 200) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("
+        SELECT al.*, u.name, u.surname
+        FROM audit_logs al
+        LEFT JOIN users u ON al.user_id = u.id
+        ORDER BY al.created_at DESC
+        LIMIT ?
+    ");
+    $stmt->execute([$limit]);
+    return $stmt->fetchAll();
+}
+
+
+// --- AUTH & PERMISSION CHECKS ---
+
+function is_admin() {
+    return isset($_SESSION['roles']['admin']) && $_SESSION['roles']['admin'] === true;
+}
+
+function is_department_manager($department_id) {
+    $current_user_id = $_SESSION['user_id'] ?? null;
+    if (!$current_user_id) return false;
+
+    $dept = get_department_by_id($department_id);
+    return $dept && $dept['manager_user_id'] == $current_user_id;
+}
+
+function can_manage_department($department_id) {
+    return is_admin() || is_department_manager($department_id);
+}
+
+function require_login() {
+    if (!isset($_SESSION['user_id'])) {
+        header("Location: login.php");
+        exit;
+    }
+}
+
+
 // --- ZABBIX USER SYNC ---
 
 function sync_zabbix_users() {
@@ -14,13 +89,11 @@ function sync_zabbix_users() {
 
     $synced_count = 0;
     foreach ($zabbix_users as $z_user) {
-        // Check if user already exists in oncall_system
         $check_stmt = $oncall_db->prepare("SELECT id FROM users WHERE zabbix_userid = ?");
         $check_stmt->execute([$z_user['userid']]);
         $existing = $check_stmt->fetch();
 
         if ($existing) {
-            // Update details
             $update_stmt = $oncall_db->prepare("
                 UPDATE users
                 SET username = ?, name = ?, surname = ?
@@ -33,8 +106,6 @@ function sync_zabbix_users() {
                 $z_user['userid']
             ]);
         } else {
-            // Insert user
-            // We default email to username@example.com
             $email = $z_user['username'] . '@example.com';
             $insert_stmt = $oncall_db->prepare("
                 INSERT INTO users (zabbix_userid, username, name, surname, email)
@@ -50,6 +121,13 @@ function sync_zabbix_users() {
             $synced_count++;
         }
     }
+
+    log_action('SYNC_USERS', [
+        'source' => 'zabbix_mysql_db',
+        'total_fetched_users' => count($zabbix_users),
+        'new_users_imported' => $synced_count
+    ]);
+
     return count($zabbix_users);
 }
 
@@ -71,7 +149,12 @@ function get_user_by_id($id) {
 
 function get_all_departments() {
     $db = get_oncall_db();
-    $stmt = $db->query("SELECT * FROM departments ORDER BY name ASC");
+    $stmt = $db->query("
+        SELECT d.*, u.username AS manager_username, u.name AS manager_name, u.surname AS manager_surname
+        FROM departments d
+        LEFT JOIN users u ON d.manager_user_id = u.id
+        ORDER BY d.name ASC
+    ");
     return $stmt->fetchAll();
 }
 
@@ -82,16 +165,46 @@ function get_department_by_id($id) {
     return $stmt->fetch();
 }
 
-function create_department($name) {
+function create_department($name, $manager_user_id = null) {
     $db = get_oncall_db();
-    $stmt = $db->prepare("INSERT INTO departments (name) VALUES (?)");
-    return $stmt->execute([trim($name)]);
+    $stmt = $db->prepare("INSERT INTO departments (name, manager_user_id) VALUES (?, ?)");
+    $res = $stmt->execute([trim($name), $manager_user_id ?: null]);
+    $dept_id = $db->lastInsertId();
+
+    log_action('CREATE_DEPARTMENT', [
+        'department_id' => $dept_id,
+        'department_name' => $name,
+        'manager_user_id' => $manager_user_id
+    ]);
+
+    return $res;
+}
+
+function update_department_manager($department_id, $manager_user_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("UPDATE departments SET manager_user_id = ? WHERE id = ?");
+    $res = $stmt->execute([$manager_user_id ?: null, $department_id]);
+
+    log_action('UPDATE_DEPARTMENT_MANAGER', [
+        'department_id' => $department_id,
+        'manager_user_id' => $manager_user_id
+    ]);
+
+    return $res;
 }
 
 function delete_department($id) {
+    $dept = get_department_by_id($id);
     $db = get_oncall_db();
     $stmt = $db->prepare("DELETE FROM departments WHERE id = ?");
-    return $stmt->execute([$id]);
+    $res = $stmt->execute([$id]);
+
+    log_action('DELETE_DEPARTMENT', [
+        'department_id' => $id,
+        'department_name' => $dept ? $dept['name'] : 'Unknown'
+    ]);
+
+    return $res;
 }
 
 function get_department_users($department_id) {
@@ -111,11 +224,9 @@ function save_department_users($department_id, $user_ids) {
     $db = get_oncall_db();
     $db->beginTransaction();
     try {
-        // Clear current users
         $stmt = $db->prepare("DELETE FROM department_users WHERE department_id = ?");
         $stmt->execute([$department_id]);
 
-        // Insert new associations
         if (!empty($user_ids)) {
             $stmt = $db->prepare("INSERT INTO department_users (department_id, user_id) VALUES (?, ?)");
             foreach ($user_ids as $u_id) {
@@ -123,6 +234,13 @@ function save_department_users($department_id, $user_ids) {
             }
         }
         $db->commit();
+
+        log_action('UPDATE_DEPARTMENT_MEMBERS', [
+            'department_id' => $department_id,
+            'user_count' => count($user_ids),
+            'user_ids' => $user_ids
+        ]);
+
         return true;
     } catch (Exception $e) {
         $db->rollBack();
@@ -140,7 +258,6 @@ function generate_365_day_schedule($department_id, $user_ids, $start_date_str) {
         throw new Exception("No users selected for the rotation.");
     }
 
-    // Align start_date to Monday at 17:00:00 of that week
     $startDateTime = new DateTime($start_date_str);
     $startDateTime->setTime(17, 0, 0);
     if ($startDateTime->format('N') != 1) {
@@ -149,11 +266,9 @@ function generate_365_day_schedule($department_id, $user_ids, $start_date_str) {
 
     $db->beginTransaction();
     try {
-        // Delete all existing schedule slots for this department
         $stmt = $db->prepare("DELETE FROM schedule_slots WHERE department_id = ?");
         $stmt->execute([$department_id]);
 
-        // Generate 52 weeks (364 days, close to 365)
         $stmt = $db->prepare("
             INSERT INTO schedule_slots (department_id, user_id, start_time, end_time)
             VALUES (?, ?, ?, ?)
@@ -178,6 +293,14 @@ function generate_365_day_schedule($department_id, $user_ids, $start_date_str) {
         }
 
         $db->commit();
+
+        log_action('GENERATE_ROTATION_SCHEDULE', [
+            'department_id' => $department_id,
+            'start_date' => $startDateTime->format('Y-m-d H:i:s'),
+            'weeks_generated' => 52,
+            'rotation_order' => $user_ids
+        ]);
+
         return true;
     } catch (Exception $e) {
         $db->rollBack();
@@ -231,13 +354,23 @@ function create_override($department_id, $user_id, $start_time, $end_time, $desc
         INSERT INTO overrides (department_id, user_id, start_time, end_time, description)
         VALUES (?, ?, ?, ?, ?)
     ");
-    return $stmt->execute([
+    $res = $stmt->execute([
         $department_id,
         $user_id,
         $start_time,
         $end_time,
         trim($description)
     ]);
+
+    log_action('CREATE_OVERRIDE', [
+        'department_id' => $department_id,
+        'user_id' => $user_id,
+        'start_time' => $start_time,
+        'end_time' => $end_time,
+        'description' => $description
+    ]);
+
+    return $res;
 }
 
 function update_override($id, $department_id, $user_id, $start_time, $end_time, $description) {
@@ -247,7 +380,7 @@ function update_override($id, $department_id, $user_id, $start_time, $end_time, 
         SET department_id = ?, user_id = ?, start_time = ?, end_time = ?, description = ?
         WHERE id = ?
     ");
-    return $stmt->execute([
+    $res = $stmt->execute([
         $department_id,
         $user_id,
         $start_time,
@@ -255,22 +388,42 @@ function update_override($id, $department_id, $user_id, $start_time, $end_time, 
         trim($description),
         $id
     ]);
+
+    log_action('UPDATE_OVERRIDE', [
+        'override_id' => $id,
+        'department_id' => $department_id,
+        'user_id' => $user_id,
+        'start_time' => $start_time,
+        'end_time' => $end_time,
+        'description' => $description
+    ]);
+
+    return $res;
 }
 
 function delete_override($id) {
+    $ov = get_override_by_id($id);
     $db = get_oncall_db();
     $stmt = $db->prepare("DELETE FROM overrides WHERE id = ?");
-    return $stmt->execute([$id]);
+    $res = $stmt->execute([$id]);
+
+    log_action('DELETE_OVERRIDE', [
+        'override_id' => $id,
+        'department_id' => $ov ? $ov['department_id'] : null,
+        'overridden_user_id' => $ov ? $ov['user_id'] : null
+    ]);
+
+    return $res;
 }
 
 
 // --- SCHEDULE CALCULATIONS & PRECEDENCE LOGIC ---
 
 function calculate_final_schedule($base_slots, $overrides) {
-    // Convert base slots to segment format
     $segments = [];
     foreach ($base_slots as $slot) {
         $segments[] = [
+            'id' => $slot['id'] ?? null,
             'start' => strtotime($slot['start_time']),
             'end' => strtotime($slot['end_time']),
             'user_id' => $slot['user_id'],
@@ -282,8 +435,6 @@ function calculate_final_schedule($base_slots, $overrides) {
         ];
     }
 
-    // Apply overrides
-    // Sort overrides chronologically by ID/creation so newer/last override wins if they overlap
     usort($overrides, function($a, $b) {
         return $a['id'] <=> $b['id'];
     });
@@ -297,19 +448,14 @@ function calculate_final_schedule($base_slots, $overrides) {
             $s_start = $seg['start'];
             $s_end = $seg['end'];
 
-            // Check overlap
             if ($s_end <= $o_start || $s_start >= $o_end) {
-                // No overlap, keep segment
                 $new_segments[] = $seg;
             } else {
-                // Overlap exists!
-                // Left part (if any)
                 if ($s_start < $o_start) {
                     $left = $seg;
                     $left['end'] = $o_start;
                     $new_segments[] = $left;
                 }
-                // Right part (if any)
                 if ($s_end > $o_end) {
                     $right = $seg;
                     $right['start'] = $o_end;
@@ -318,8 +464,8 @@ function calculate_final_schedule($base_slots, $overrides) {
             }
         }
 
-        // Add the override itself as a segment
         $new_segments[] = [
+            'id' => null,
             'start' => $o_start,
             'end' => $o_end,
             'user_id' => $override['user_id'],
@@ -333,12 +479,10 @@ function calculate_final_schedule($base_slots, $overrides) {
         $segments = $new_segments;
     }
 
-    // Filter out segments with duration 0 or negative
     $segments = array_filter($segments, function($seg) {
         return $seg['end'] > $seg['start'];
     });
 
-    // Sort segments by start time
     usort($segments, function($a, $b) {
         return $a['start'] <=> $b['start'];
     });
@@ -349,7 +493,6 @@ function calculate_final_schedule($base_slots, $overrides) {
 function get_final_schedule_for_department($department_id, $start_time_str, $end_time_str) {
     $db = get_oncall_db();
 
-    // Fetch base slots overlapping the period
     $stmt = $db->prepare("
         SELECT s.*, u.username, u.name, u.surname
         FROM schedule_slots s
@@ -362,7 +505,6 @@ function get_final_schedule_for_department($department_id, $start_time_str, $end
     $stmt->execute([$department_id, $end_time_str, $start_time_str]);
     $base_slots = $stmt->fetchAll();
 
-    // Fetch overrides overlapping the period
     $stmt = $db->prepare("
         SELECT o.*, u.username, u.name, u.surname
         FROM overrides o
@@ -379,11 +521,8 @@ function get_final_schedule_for_department($department_id, $start_time_str, $end
 }
 
 function get_final_schedule_for_user($user_id, $start_time_str, $end_time_str) {
-    // To show user's schedule, we fetch final schedule for ALL departments they belong to,
-    // and then filter for segments where user_id matches.
     $db = get_oncall_db();
 
-    // Get departments the user belongs to
     $stmt = $db->prepare("
         SELECT department_id FROM department_users WHERE user_id = ?
     ");
@@ -406,10 +545,231 @@ function get_final_schedule_for_user($user_id, $start_time_str, $end_time_str) {
         }
     }
 
-    // Sort user segments by start time
     usort($user_segments, function($a, $b) {
         return $a['start'] <=> $b['start'];
     });
 
     return $user_segments;
+}
+
+
+// --- SHIFT TRADES OPERATIONS ---
+
+function get_trade_requests_by_department($department_id = null) {
+    $db = get_oncall_db();
+    $sql = "
+        SELECT tr.*,
+               p.name AS proposer_name, p.surname AS proposer_surname, p.username AS proposer_username,
+               a.name AS accepter_name, a.surname AS accepter_surname, a.username AS accepter_username,
+               d.name AS department_name,
+               s_offered.start_time AS offered_start, s_offered.end_time AS offered_end,
+               s_counter.start_time AS counter_start, s_counter.end_time AS counter_end
+        FROM trade_requests tr
+        JOIN users p ON tr.proposing_user_id = p.id
+        LEFT JOIN users a ON tr.accepting_user_id = a.id
+        JOIN departments d ON tr.department_id = d.id
+        JOIN schedule_slots s_offered ON tr.offered_slot_id = s_offered.id
+        LEFT JOIN schedule_slots s_counter ON tr.counter_slot_id = s_counter.id
+    ";
+    $params = [];
+    if ($department_id) {
+        $sql .= " WHERE tr.department_id = ? ";
+        $params[] = $department_id;
+    }
+    $sql .= " ORDER BY tr.created_at DESC ";
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+function get_trade_request_by_id($trade_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("
+        SELECT tr.*,
+               p.name AS proposer_name, p.surname AS proposer_surname, p.username AS proposer_username,
+               a.name AS accepter_name, a.surname AS accepter_surname, a.username AS accepter_username,
+               d.name AS department_name,
+               s_offered.start_time AS offered_start, s_offered.end_time AS offered_end,
+               s_counter.start_time AS counter_start, s_counter.end_time AS counter_end
+        FROM trade_requests tr
+        JOIN users p ON tr.proposing_user_id = p.id
+        LEFT JOIN users a ON tr.accepting_user_id = a.id
+        JOIN departments d ON tr.department_id = d.id
+        JOIN schedule_slots s_offered ON tr.offered_slot_id = s_offered.id
+        LEFT JOIN schedule_slots s_counter ON tr.counter_slot_id = s_counter.id
+        WHERE tr.id = ?
+    ");
+    $stmt->execute([$trade_id]);
+    return $stmt->fetch();
+}
+
+function get_user_schedule_slots($user_id, $department_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("
+        SELECT s.*, d.name AS department_name
+        FROM schedule_slots s
+        JOIN departments d ON s.department_id = d.id
+        WHERE s.user_id = ? AND s.department_id = ? AND s.start_time >= NOW()
+        ORDER BY s.start_time ASC
+    ");
+    $stmt->execute([$user_id, $department_id]);
+    return $stmt->fetchAll();
+}
+
+function propose_trade($department_id, $offered_slot_id, $proposing_user_id) {
+    $db = get_oncall_db();
+
+    $stmt = $db->prepare("SELECT id FROM trade_requests WHERE offered_slot_id = ? AND status IN ('open', 'offered', 'agreed')");
+    $stmt->execute([$offered_slot_id]);
+    if ($stmt->fetch()) {
+        throw new Exception("This slot is already up for trade or has a pending request.");
+    }
+
+    $stmt = $db->prepare("
+        INSERT INTO trade_requests (department_id, offered_slot_id, proposing_user_id, status)
+        VALUES (?, ?, ?, 'open')
+    ");
+    $res = $stmt->execute([$department_id, $offered_slot_id, $proposing_user_id]);
+
+    log_action('PROPOSE_SHIFT_TRADE', [
+        'department_id' => $department_id,
+        'offered_slot_id' => $offered_slot_id,
+        'proposing_user_id' => $proposing_user_id
+    ]);
+
+    return $res;
+}
+
+function accept_trade_take($trade_id, $accepting_user_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("
+        UPDATE trade_requests
+        SET accepting_user_id = ?, counter_slot_id = NULL, status = 'agreed'
+        WHERE id = ? AND status = 'open'
+    ");
+    $res = $stmt->execute([$accepting_user_id, $trade_id]);
+
+    log_action('ACCEPT_TRADE_TAKE', [
+        'trade_id' => $trade_id,
+        'accepting_user_id' => $accepting_user_id
+    ]);
+
+    return $res;
+}
+
+function accept_trade_swap($trade_id, $accepting_user_id, $counter_slot_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("
+        UPDATE trade_requests
+        SET accepting_user_id = ?, counter_slot_id = ?, status = 'offered'
+        WHERE id = ? AND status = 'open'
+    ");
+    $res = $stmt->execute([$accepting_user_id, $counter_slot_id, $trade_id]);
+
+    log_action('OFFER_TRADE_SWAP', [
+        'trade_id' => $trade_id,
+        'accepting_user_id' => $accepting_user_id,
+        'counter_slot_id' => $counter_slot_id
+    ]);
+
+    return $res;
+}
+
+function proposer_agree_swap($trade_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("
+        UPDATE trade_requests
+        SET status = 'agreed'
+        WHERE id = ? AND status = 'offered'
+    ");
+    $res = $stmt->execute([$trade_id]);
+
+    log_action('PROPOSER_AGREE_SWAP', [
+        'trade_id' => $trade_id
+    ]);
+
+    return $res;
+}
+
+function cancel_trade_request($trade_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("DELETE FROM trade_requests WHERE id = ?");
+    $res = $stmt->execute([$trade_id]);
+
+    log_action('CANCEL_SHIFT_TRADE', [
+        'trade_id' => $trade_id
+    ]);
+
+    return $res;
+}
+
+function manager_approve_trade($trade_id, $manager_user_id) {
+    $db = get_oncall_db();
+    $trade = get_trade_request_by_id($trade_id);
+    if (!$trade) {
+        throw new Exception("Trade request not found.");
+    }
+
+    if (!can_manage_department($trade['department_id'])) {
+        throw new Exception("Unauthorized: Only the department manager or admin can approve trades.");
+    }
+
+    if ($trade['status'] !== 'agreed') {
+        throw new Exception("Trade request is not in agreed state.");
+    }
+
+    $db->beginTransaction();
+    try {
+        if ($trade['counter_slot_id']) {
+            $stmt = $db->prepare("UPDATE schedule_slots SET user_id = ? WHERE id = ?");
+            $stmt->execute([$trade['accepting_user_id'], $trade['offered_slot_id']]);
+
+            $stmt = $db->prepare("UPDATE schedule_slots SET user_id = ? WHERE id = ?");
+            $stmt->execute([$trade['proposing_user_id'], $trade['counter_slot_id']]);
+        } else {
+            $stmt = $db->prepare("UPDATE schedule_slots SET user_id = ? WHERE id = ?");
+            $stmt->execute([$trade['accepting_user_id'], $trade['offered_slot_id']]);
+        }
+
+        $stmt = $db->prepare("UPDATE trade_requests SET status = 'approved' WHERE id = ?");
+        $stmt->execute([$trade_id]);
+
+        $db->commit();
+
+        log_action('MANAGER_APPROVE_TRADE', [
+            'trade_id' => $trade_id,
+            'department_id' => $trade['department_id'],
+            'proposing_user_id' => $trade['proposing_user_id'],
+            'accepting_user_id' => $trade['accepting_user_id'],
+            'counter_slot_id' => $trade['counter_slot_id']
+        ]);
+
+        return true;
+    } catch (Exception $e) {
+        $db->rollBack();
+        throw $e;
+    }
+}
+
+function manager_reject_trade($trade_id, $manager_user_id) {
+    $db = get_oncall_db();
+    $trade = get_trade_request_by_id($trade_id);
+    if (!$trade) {
+         throw new Exception("Trade request not found.");
+    }
+
+    if (!can_manage_department($trade['department_id'])) {
+        throw new Exception("Unauthorized: Only the department manager or admin can reject trades.");
+    }
+
+    $stmt = $db->prepare("UPDATE trade_requests SET status = 'rejected' WHERE id = ?");
+    $res = $stmt->execute([$trade_id]);
+
+    log_action('MANAGER_REJECT_TRADE', [
+        'trade_id' => $trade_id,
+        'department_id' => $trade['department_id']
+    ]);
+
+    return $res;
 }

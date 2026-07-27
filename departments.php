@@ -3,47 +3,85 @@
 require_once 'header.php';
 require_once 'models.php';
 
+// Only admins can view/manage department creation/deletion
+// Managers can only manage membership for their assigned departments
+if (!is_admin() && empty(get_all_departments())) {
+    echo "<div class='alert alert-danger'>Access Denied: Only Administrators can create or manage departments.</div>";
+    require_once 'footer.php';
+    exit;
+}
+
 $message = '';
 $error = '';
 
-// Handle creating department
+// Handle creating department (Admin only)
 if (isset($_POST['create_dept'])) {
-    $name = trim($_POST['name'] ?? '');
-    if ($name === '') {
-        $error = 'Department name cannot be empty.';
+    if (!is_admin()) {
+        $error = 'Unauthorized: Only Administrators can create departments.';
     } else {
+        $name = trim($_POST['name'] ?? '');
+        $manager_user_id = $_POST['manager_user_id'] ? (int)$_POST['manager_user_id'] : null;
+
+        if ($name === '') {
+            $error = 'Department name cannot be empty.';
+        } else {
+            try {
+                create_department($name, $manager_user_id);
+                $message = "Department '" . htmlspecialchars($name) . "' created successfully!";
+            } catch (Exception $e) {
+                $error = "Failed to create department: " . $e->getMessage();
+            }
+        }
+    }
+}
+
+// Handle updating department manager (Admin only)
+if (isset($_POST['update_manager'])) {
+    if (!is_admin()) {
+        $error = 'Unauthorized: Only Administrators can assign managers.';
+    } else {
+        $dept_id = (int)$_POST['dept_id'];
+        $manager_user_id = $_POST['manager_user_id'] ? (int)$_POST['manager_user_id'] : null;
         try {
-            create_department($name);
-            $message = "Department '" . htmlspecialchars($name) . "' created successfully!";
+            update_department_manager($dept_id, $manager_user_id);
+            $message = "Department manager updated successfully!";
         } catch (Exception $e) {
-            $error = "Failed to create department: " . $e->getMessage();
+            $error = "Failed to update manager: " . $e->getMessage();
         }
     }
 }
 
-// Handle deleting department
+// Handle deleting department (Admin only)
 if (isset($_GET['delete_id'])) {
-    $delete_id = (int)$_GET['delete_id'];
-    try {
-        $dept = get_department_by_id($delete_id);
-        if ($dept) {
-            delete_department($delete_id);
-            $message = "Department '" . htmlspecialchars($dept['name']) . "' deleted successfully!";
+    if (!is_admin()) {
+        $error = 'Unauthorized: Only Administrators can delete departments.';
+    } else {
+        $delete_id = (int)$_GET['delete_id'];
+        try {
+            $dept = get_department_by_id($delete_id);
+            if ($dept) {
+                delete_department($delete_id);
+                $message = "Department '" . htmlspecialchars($dept['name']) . "' deleted successfully!";
+            }
+        } catch (Exception $e) {
+            $error = "Failed to delete department: " . $e->getMessage();
         }
-    } catch (Exception $e) {
-        $error = "Failed to delete department: " . $e->getMessage();
     }
 }
 
-// Handle updating department members
+// Handle updating department members (Admin or Group Manager)
 if (isset($_POST['update_members'])) {
     $dept_id = (int)$_POST['dept_id'];
-    $selected_users = $_POST['members'] ?? []; // Array of user IDs
-    try {
-        save_department_users($dept_id, $selected_users);
-        $message = "Department members updated successfully!";
-    } catch (Exception $e) {
-        $error = "Failed to update members: " . $e->getMessage();
+    if (!can_manage_department($dept_id)) {
+        $error = 'Unauthorized: Only the designated Department Manager or Admin can manage membership.';
+    } else {
+        $selected_users = $_POST['members'] ?? []; // Array of user IDs
+        try {
+            save_department_users($dept_id, $selected_users);
+            $message = "Department members updated successfully!";
+        } catch (Exception $e) {
+            $error = "Failed to update members: " . $e->getMessage();
+        }
     }
 }
 
@@ -57,8 +95,13 @@ $managed_user_ids = [];
 if ($manage_id) {
     $managed_dept = get_department_by_id($manage_id);
     if ($managed_dept) {
-        $dept_users = get_department_users($manage_id);
-        $managed_user_ids = array_column($dept_users, 'id');
+        if (!can_manage_department($manage_id)) {
+            $error = 'Unauthorized: You are not the manager of this department.';
+            $managed_dept = null;
+        } else {
+            $dept_users = get_department_users($manage_id);
+            $managed_user_ids = array_column($dept_users, 'id');
+        }
     }
 }
 ?>
@@ -66,7 +109,7 @@ if ($manage_id) {
 <div class="row mb-4">
     <div class="col-md-12">
         <h1 class="h2"><i class="fa-solid fa-sitemap text-primary me-2"></i>Departments</h1>
-        <p class="text-muted">Manage company/team departments and allocate synchronized team members to them.</p>
+        <p class="text-muted">Manage departments, designate group managers, and allocate team members to their groups.</p>
     </div>
 </div>
 
@@ -97,7 +140,7 @@ if ($manage_id) {
                     <div class="text-center p-5">
                         <div class="mb-3 text-muted" style="font-size: 3rem;"><i class="fa-solid fa-folder-open"></i></div>
                         <h5>No Departments</h5>
-                        <p class="text-muted">Fill out the creation form on the right to add your first department!</p>
+                        <p class="text-muted">An Administrator can create the first department using the form on the right!</p>
                     </div>
                 <?php else: ?>
                     <div class="table-responsive">
@@ -106,6 +149,7 @@ if ($manage_id) {
                                 <tr>
                                     <th>ID</th>
                                     <th>Department Name</th>
+                                    <th>Group Manager</th>
                                     <th>Team Size</th>
                                     <th class="text-end">Actions</th>
                                 </tr>
@@ -116,6 +160,11 @@ if ($manage_id) {
                                     $members = get_department_users($dept['id']);
                                     $size = count($members);
                                     $is_current = ($manage_id == $dept['id']);
+                                    $manager_text = $dept['manager_name']
+                                        ? htmlspecialchars($dept['manager_name'] . ' ' . $dept['manager_surname'] . ' (@' . $dept['manager_username'] . ')')
+                                        : '<span class="text-danger fw-semibold small"><i class="fa-solid fa-triangle-exclamation me-1"></i>No Manager Assigned</span>';
+
+                                    $is_mgr_or_admin = can_manage_department($dept['id']);
                                     ?>
                                     <tr class="<?= $is_current ? 'table-primary' : '' ?>">
                                         <td class="fw-bold">#<?= $dept['id'] ?></td>
@@ -123,15 +172,27 @@ if ($manage_id) {
                                             <span class="fw-semibold text-dark"><?= htmlspecialchars($dept['name']) ?></span>
                                         </td>
                                         <td>
+                                            <?= $manager_text ?>
+                                        </td>
+                                        <td>
                                             <span class="badge bg-secondary rounded-pill"><?= $size ?> members</span>
                                         </td>
                                         <td class="text-end">
-                                            <a href="departments.php?manage_id=<?= $dept['id'] ?>" class="btn btn-sm btn-outline-primary me-1">
-                                                <i class="fa-solid fa-users me-1"></i> Members
-                                            </a>
-                                            <a href="departments.php?delete_id=<?= $dept['id'] ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this department? This will delete all its rotation schedules and overrides!');">
-                                                <i class="fa-solid fa-trash"></i>
-                                            </a>
+                                            <?php if ($is_mgr_or_admin): ?>
+                                                <a href="departments.php?manage_id=<?= $dept['id'] ?>" class="btn btn-sm btn-outline-primary me-1">
+                                                    <i class="fa-solid fa-users me-1"></i> Members
+                                                </a>
+                                            <?php else: ?>
+                                                <button class="btn btn-sm btn-outline-secondary me-1" disabled title="You are not authorized to manage this group">
+                                                    <i class="fa-solid fa-lock me-1"></i> Locked
+                                                </button>
+                                            <?php endif; ?>
+
+                                            <?php if (is_admin()): ?>
+                                                <a href="departments.php?delete_id=<?= $dept['id'] ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this department?');">
+                                                    <i class="fa-solid fa-trash"></i>
+                                                </a>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -146,7 +207,7 @@ if ($manage_id) {
     <!-- Right Column: Create Department or Manage Members -->
     <div class="col-lg-5">
         <?php if ($managed_dept): ?>
-            <!-- Manage Members Form -->
+            <!-- Manage Members Form (Authorized Department Manager or Admin) -->
             <div class="card border-primary">
                 <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                     <span><i class="fa-solid fa-users-gear me-2"></i>Members: <?= htmlspecialchars($managed_dept['name']) ?></span>
@@ -161,7 +222,6 @@ if ($manage_id) {
                         <?php if (empty($all_users)): ?>
                             <div class="text-center py-3">
                                 <p class="text-danger small mb-0">No users found in database.</p>
-                                <a href="sync.php" class="btn btn-sm btn-outline-danger mt-2">Sync Users First</a>
                             </div>
                         <?php else: ?>
                             <div style="max-height: 300px; overflow-y: auto;" class="border rounded p-3 mb-3 bg-light">
@@ -187,24 +247,74 @@ if ($manage_id) {
                     </form>
                 </div>
             </div>
+
+            <!-- Manager reassignment section (Admin only) -->
+            <?php if (is_admin()): ?>
+                <div class="card mt-3">
+                    <div class="card-header bg-white fw-bold text-dark">
+                        <i class="fa-solid fa-user-tie me-2 text-primary"></i>Assign Group Manager
+                    </div>
+                    <div class="card-body">
+                        <form method="POST">
+                            <input type="hidden" name="dept_id" value="<?= $managed_dept['id'] ?>">
+                            <div class="mb-3">
+                                <label for="manager_user_id" class="form-label small fw-semibold">Group Manager</label>
+                                <select name="manager_user_id" id="manager_user_id" class="form-select form-select-sm">
+                                    <option value="">-- No Manager --</option>
+                                    <?php foreach ($all_users as $u): ?>
+                                        <option value="<?= $u['id'] ?>" <?= ($managed_dept['manager_user_id'] == $u['id']) ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($u['name'] . ' ' . $u['surname']) ?> (@<?= htmlspecialchars($u['username']) ?>)
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <button type="submit" name="update_manager" class="btn btn-sm btn-outline-primary w-100">
+                                <i class="fa-solid fa-save me-1"></i>Update Manager
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            <?php endif; ?>
+
         <?php else: ?>
-            <!-- Create Department Form -->
-            <div class="card">
-                <div class="card-header bg-white">
-                    <i class="fa-solid fa-folder-plus me-2 text-success"></i>Create Department
+            <!-- Create Department Form (Admin Only) -->
+            <?php if (is_admin()): ?>
+                <div class="card">
+                    <div class="card-header bg-white">
+                        <i class="fa-solid fa-folder-plus me-2 text-success"></i>Create Department
+                    </div>
+                    <div class="card-body">
+                        <form method="POST">
+                            <div class="mb-3">
+                                <label for="name" class="form-label fw-semibold">Department Name</label>
+                                <input type="text" class="form-control" name="name" id="name" placeholder="e.g. SysOps Core Team, DevOps, DBA" required>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="manager_user_id" class="form-label fw-semibold">Assign On-Call Manager</label>
+                                <select name="manager_user_id" id="manager_user_id" class="form-select">
+                                    <option value="">-- Select Manager --</option>
+                                    <?php foreach ($all_users as $user): ?>
+                                        <option value="<?= $user['id'] ?>">
+                                            <?= htmlspecialchars($user['name'] . ' ' . $user['surname']) ?> (@<?= htmlspecialchars($user['username']) ?>)
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+
+                            <button type="submit" name="create_dept" class="btn btn-success w-100">
+                                <i class="fa-solid fa-plus me-2"></i>Add Department
+                            </button>
+                        </form>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <form method="POST">
-                        <div class="mb-3">
-                            <label for="name" class="form-label fw-semibold">Department Name</label>
-                            <input type="text" class="form-control" name="name" id="name" placeholder="e.g. SysOps Core Team, DevOps, DBA" required>
-                        </div>
-                        <button type="submit" name="create_dept" class="btn btn-success w-100">
-                            <i class="fa-solid fa-plus me-2"></i>Add Department
-                        </button>
-                    </form>
+            <?php else: ?>
+                <div class="card text-center p-4">
+                    <i class="fa-solid fa-lock text-muted mb-3 fs-1"></i>
+                    <h5>Administrator Panel Only</h5>
+                    <p class="text-muted small">Only Global Administrators are authorized to create or delete on-call groups.</p>
                 </div>
-            </div>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>

@@ -1,6 +1,17 @@
 <?php
 // calendar_events.php - JSON endpoint for FullCalendar events
 header('Content-Type: application/json');
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+if (!isset($_SESSION['user_id'])) {
+    header('HTTP/1.1 401 Unauthorized');
+    echo json_encode(['error' => 'Unauthorized']);
+    exit;
+}
+
 require_once 'models.php';
 
 $department_id = isset($_GET['department_id']) ? (int)$_GET['department_id'] : null;

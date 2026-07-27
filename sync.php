@@ -3,6 +3,13 @@
 require_once 'header.php';
 require_once 'models.php';
 
+// Access Control: Only Global Administrators can access sync.php
+if (!is_admin()) {
+    echo "<div class='alert alert-danger p-4'><i class='fa-solid fa-circle-exclamation me-2'></i>Access Denied: Only Global Administrators can access the Zabbix synchronization portal.</div>";
+    require_once 'footer.php';
+    exit;
+}
+
 $message = '';
 $error = '';
 
@@ -75,7 +82,6 @@ $departments = get_all_departments();
                     <tbody>
                         <?php foreach ($users as $user): ?>
                             <?php
-                            // Get departments for this user
                             $db = get_oncall_db();
                             $stmt = $db->prepare("
                                 SELECT d.name
