@@ -121,43 +121,9 @@ $users = get_all_users();
     <?php endif; ?>
 
     <!-- Real Azure Login -->
-    <form method="POST" class="mb-4">
-        <button type="submit" name="azure_login" class="btn btn-outline-primary btn-lg w-100 d-flex align-items-center justify-content-center">
-            <i class="fa-brands fa-microsoft me-2"></i> Sign in with Microsoft Azure
-        </button>
-    </form>
-
-    <div class="position-relative my-4">
-        <hr>
-        <span class="position-absolute top-50 start-50 translate-middle bg-white px-3 text-muted small">OR DEVELOPER BYPASS</span>
-    </div>
-
-    <!-- Developer/Mock Bypass -->
     <form method="POST">
-        <div class="mb-3">
-            <label for="user_id" class="form-label fw-semibold small">Choose User</label>
-            <select name="user_id" id="user_id" class="form-select form-select-sm" required>
-                <option value="">-- Choose Synced User --</option>
-                <?php foreach ($users as $u): ?>
-                    <option value="<?= $u['id'] ?>">
-                        <?= htmlspecialchars($u['name'] . ' ' . $u['surname']) ?> (@<?= htmlspecialchars($u['username']) ?>)
-                    </option>
-                <?php endforeach; ?>
-            </select>
-            <div class="form-text small text-muted">If no users appear, sync them first using Zabbix sync page.</div>
-        </div>
-
-        <div class="mb-3">
-            <label for="role" class="form-label fw-semibold small">Select Role</label>
-            <select name="role" id="role" class="form-select form-select-sm" required>
-                <option value="user">Regular Team Member (User)</option>
-                <option value="manager">On-Call Manager (Manager)</option>
-                <option value="admin">Global Administrator (Admin)</option>
-            </select>
-        </div>
-
-        <button type="submit" name="mock_login" class="btn btn-dark btn-sm w-100">
-            <i class="fa-solid fa-bug me-2"></i>Login with Selected Role
+        <button type="submit" name="azure_login" class="btn btn-primary btn-lg w-100 d-flex align-items-center justify-content-center">
+            <i class="fa-brands fa-microsoft me-2"></i> Sign in with Microsoft Azure
         </button>
     </form>
 </div>

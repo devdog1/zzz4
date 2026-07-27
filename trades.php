@@ -102,6 +102,15 @@ $stmt = $db->prepare("SELECT department_id FROM department_users WHERE user_id =
 $stmt->execute([$current_user_id]);
 $my_dept_ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
+// Get all departments to determine if they manage any
+$all_departments = get_all_departments();
+$managed_dept_ids = [];
+foreach ($all_departments as $dept) {
+    if (can_manage_department($dept['id'])) {
+        $managed_dept_ids[] = $dept['id'];
+    }
+}
+
 // Fetch user's future slots that are eligible for trade
 $eligible_slots = [];
 if (!empty($my_dept_ids)) {
@@ -117,10 +126,11 @@ if (!empty($my_dept_ids)) {
     $eligible_slots = $stmt->fetchAll();
 }
 
-// Fetch all open/offered/agreed trade requests in the departments the user belongs to
+// Fetch all open/offered/agreed trade requests in departments they belong to OR manage
 $all_trades = [];
-if (!empty($my_dept_ids)) {
-    foreach ($my_dept_ids as $dept_id) {
+$relevant_dept_ids = array_unique(array_merge($my_dept_ids, $managed_dept_ids));
+if (!empty($relevant_dept_ids)) {
+    foreach ($relevant_dept_ids as $dept_id) {
         $dept_trades = get_trade_requests_by_department($dept_id);
         $all_trades = array_merge($all_trades, $dept_trades);
     }
@@ -128,7 +138,6 @@ if (!empty($my_dept_ids)) {
 
 // Group manager pending trades
 $pending_approvals = [];
-$all_departments = get_all_departments();
 foreach ($all_departments as $dept) {
     if (can_manage_department($dept['id'])) {
         $dept_trades = get_trade_requests_by_department($dept['id']);

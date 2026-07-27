@@ -223,6 +223,47 @@ function create_department($name, $manager_user_id = null) {
     return $res;
 }
 
+function is_user_in_department($user_id, $department_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("SELECT 1 FROM department_users WHERE user_id = ? AND department_id = ?");
+    $stmt->execute([$user_id, $department_id]);
+    return (bool)$stmt->fetch();
+}
+
+function can_user_create_override($dept_id, $target_user_id) {
+    $current_user_id = $_SESSION['user_id'] ?? null;
+    if (!$current_user_id) return false;
+
+    // Admin or group manager can assign to anyone
+    if (can_manage_department($dept_id)) {
+        return true;
+    }
+
+    // A normal user can only assign to themselves, and must be in that department
+    if ($target_user_id == $current_user_id && is_user_in_department($current_user_id, $dept_id)) {
+        return true;
+    }
+
+    return false;
+}
+
+function get_departments_for_user_override($user_id) {
+    if (has_permission('manage_departments')) {
+        return get_all_departments();
+    }
+    // Get departments they manage or are a member of
+    $db = get_oncall_db();
+    $stmt = $db->prepare("
+        SELECT DISTINCT d.*
+        FROM departments d
+        LEFT JOIN department_users du ON d.id = du.department_id
+        WHERE d.manager_user_id = ? OR du.user_id = ?
+        ORDER BY d.name ASC
+    ");
+    $stmt->execute([$user_id, $user_id]);
+    return $stmt->fetchAll();
+}
+
 function update_department_manager($department_id, $manager_user_id) {
     $db = get_oncall_db();
     $stmt = $db->prepare("UPDATE departments SET manager_user_id = ? WHERE id = ?");

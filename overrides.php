@@ -9,7 +9,8 @@ $error = '';
 $action = $_GET['action'] ?? 'list';
 $id = isset($_GET['id']) ? (int)$_GET['id'] : null;
 
-$departments = get_all_departments();
+$current_user_id = $_SESSION['user_id'] ?? null;
+$departments = get_departments_for_user_override($current_user_id);
 $all_users = get_all_users();
 
 // Handle form submissions
@@ -25,8 +26,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $start_time = str_replace('T', ' ', $start_time);
         $end_time = str_replace('T', ' ', $end_time);
 
-        if (!can_manage_department($dept_id)) {
-            $error = 'Unauthorized: Only the designated Department Manager or Admin can create/edit overrides for this department.';
+        if (!can_user_create_override($dept_id, $user_id)) {
+            $error = 'Unauthorized: You can only assign overrides to yourself in a department you belong to, unless you are the manager or an admin.';
         } elseif (!$dept_id || !$user_id || empty($start_time) || empty($end_time)) {
             $error = 'All fields except description are required.';
         } elseif (strtotime($end_time) <= strtotime($start_time)) {
@@ -52,8 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Handle delete
 if ($action === 'delete' && $id) {
     $override_data = get_override_by_id($id);
-    if ($override_data && !can_manage_department($override_data['department_id'])) {
-        $error = 'Unauthorized: Only the designated Department Manager or Admin can delete overrides.';
+    if ($override_data && !can_user_create_override($override_data['department_id'], $override_data['user_id'])) {
+        $error = 'Unauthorized: Only the designated Department Manager or Admin can delete overrides, unless it is your own override.';
     } else {
         try {
             delete_override($id);
@@ -72,7 +73,7 @@ if ($action === 'edit' && $id) {
     if (!$override_data) {
         $error = 'Override not found.';
         $action = 'list';
-    } elseif (!can_manage_department($override_data['department_id'])) {
+    } elseif (!can_user_create_override($override_data['department_id'], $override_data['user_id'])) {
         $error = 'Unauthorized: You cannot edit this override.';
         $action = 'list';
         $override_data = null;
@@ -158,7 +159,7 @@ $overrides = get_overrides();
                                 } else {
                                     $status_badge = '<span class="badge bg-info text-dark small ms-2">UPCOMING</span>';
                                 }
-                                $can_edit = can_manage_department($ov['department_id']);
+                                $can_edit = can_user_create_override($ov['department_id'], $ov['user_id']);
                                 ?>
                                 <tr>
                                     <td class="fw-bold">#<?= $ov['id'] ?></td>
@@ -232,11 +233,26 @@ $overrides = get_overrides();
                         <div class="mb-3">
                             <label for="user_id" class="form-label fw-semibold">Covering User</label>
                             <select name="user_id" id="user_id" class="form-select" required>
-                                <option value="">-- Select Covering User --</option>
+                                <?php
+                                $current_user_id = $_SESSION['user_id'] ?? null;
+                                ?>
                                 <?php foreach ($all_users as $user): ?>
                                     <?php
+                                    // If not manager/admin, they can ONLY see themselves in the list
+                                    $is_manager_or_admin = false;
+                                    foreach ($departments as $d) {
+                                        if (can_manage_department($d['id'])) {
+                                            $is_manager_or_admin = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!$is_manager_or_admin && $user['id'] != $current_user_id) {
+                                        continue;
+                                    }
                                     $selected = '';
                                     if ($override_data && $override_data['user_id'] == $user['id']) {
+                                        $selected = 'selected';
+                                    } elseif (!$override_data && $user['id'] == $current_user_id) {
                                         $selected = 'selected';
                                     }
                                     ?>
