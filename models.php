@@ -1,6 +1,7 @@
 <?php
 // models.php - Database Operations and Business Logic
 require_once 'db.php';
+require_once 'CommPortal.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -228,6 +229,55 @@ function create_department($name, $manager_user_id = null) {
     ]);
 
     return $res;
+}
+
+function get_department_commportal_accounts($department_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("SELECT * FROM commportal_accounts WHERE department_id = ? ORDER BY phone_number ASC");
+    $stmt->execute([$department_id]);
+    return $stmt->fetchAll();
+}
+
+function create_department_commportal_account($department_id, $phone_number, $password, $ext = null) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("
+        INSERT INTO commportal_accounts (department_id, phone_number, password, ext)
+        VALUES (?, ?, ?, ?)
+    ");
+    $res = $stmt->execute([
+        $department_id,
+        trim($phone_number),
+        trim($password),
+        $ext ? trim($ext) : null
+    ]);
+
+    log_action('CREATE_COMMPORTAL_ACCOUNT', [
+        'department_id' => $department_id,
+        'phone_number' => $phone_number,
+        'ext' => $ext
+    ]);
+
+    return $res;
+}
+
+function delete_department_commportal_account($id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("SELECT * FROM commportal_accounts WHERE id = ?");
+    $stmt->execute([$id]);
+    $account = $stmt->fetch();
+
+    if ($account) {
+        $stmt = $db->prepare("DELETE FROM commportal_accounts WHERE id = ?");
+        $res = $stmt->execute([$id]);
+
+        log_action('DELETE_COMMPORTAL_ACCOUNT', [
+            'id' => $id,
+            'department_id' => $account['department_id'],
+            'phone_number' => $account['phone_number']
+        ]);
+        return $res;
+    }
+    return false;
 }
 
 function get_department_zabbix_groups($department_id) {

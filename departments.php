@@ -43,6 +43,40 @@ if (isset($_POST['create_dept'])) {
     }
 }
 
+// Handle adding CommPortal account mapping
+if (isset($_POST['add_commportal_account'])) {
+    $dept_id = (int)$_POST['dept_id'];
+    if (!can_manage_department($dept_id)) {
+        $error = 'Unauthorized: Only the designated On-Call Manager or Admin can configure CommPortal.';
+    } else {
+        $phone = $_POST['cp_phone'] ?? '';
+        $pass = $_POST['cp_pass'] ?? '';
+        $ext = $_POST['cp_ext'] ?? null;
+        try {
+            create_department_commportal_account($dept_id, $phone, $pass, $ext);
+            $message = "CommPortal account mapping added successfully!";
+        } catch (Exception $e) {
+            $error = "Failed to add CommPortal mapping: " . $e->getMessage();
+        }
+    }
+}
+
+// Handle deleting CommPortal account mapping
+if (isset($_GET['delete_cp_id']) && isset($_GET['manage_id'])) {
+    $dept_id = (int)$_GET['manage_id'];
+    if (!can_manage_department($dept_id)) {
+        $error = 'Unauthorized: Only the designated On-Call Manager or Admin can configure CommPortal.';
+    } else {
+        $delete_cp_id = (int)$_GET['delete_cp_id'];
+        try {
+            delete_department_commportal_account($delete_cp_id);
+            $message = "CommPortal account mapping removed successfully!";
+        } catch (Exception $e) {
+            $error = "Failed to remove CommPortal mapping: " . $e->getMessage();
+        }
+    }
+}
+
 // Handle updating NOC Mode configuration
 if (isset($_POST['save_noc_config'])) {
     $dept_id = (int)$_POST['dept_id'];
@@ -449,6 +483,78 @@ if ($manage_id) {
 
                         <button type="submit" name="save_noc_config" class="btn btn-sm btn-danger w-100 mt-2">
                             <i class="fa-solid fa-save me-1"></i>Save NOC Configuration
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Map CommPortal Accounts (Manager or Admin) -->
+            <div class="card mt-3 border-info">
+                <div class="card-header bg-info text-dark fw-bold">
+                    <i class="fa-solid fa-phone me-2"></i>CommPortal Telephony Sync
+                </div>
+                <div class="card-body">
+                    <?php
+                    $cp_accounts = get_department_commportal_accounts($managed_dept['id']);
+                    ?>
+                    <h6 class="fw-bold mb-2 text-dark small"><i class="fa-solid fa-list me-1 text-muted"></i>Mapped CommPortal Accounts</h6>
+                    <?php if (empty($cp_accounts)): ?>
+                        <p class="text-muted small mb-3">No CommPortal phone accounts mapped to this department yet.</p>
+                    <?php else: ?>
+                        <div class="table-responsive mb-3">
+                            <table class="table table-sm table-bordered align-middle small mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Phone Number</th>
+                                        <th>Ext</th>
+                                        <th>Last Forwarded</th>
+                                        <th class="text-end">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($cp_accounts as $acc): ?>
+                                        <tr>
+                                            <td class="fw-semibold"><code><?= htmlspecialchars($acc['phone_number']) ?></code></td>
+                                            <td><?= htmlspecialchars($acc['ext'] ?: '-') ?></td>
+                                            <td>
+                                                <?php if ($acc['last_forwarded_phone']): ?>
+                                                    <span class="badge bg-success small"><?= htmlspecialchars($acc['last_forwarded_phone']) ?></span>
+                                                <?php else: ?>
+                                                    <span class="text-muted small">Never</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="text-end">
+                                                <a href="departments.php?manage_id=<?= $managed_dept['id'] ?>&delete_cp_id=<?= $acc['id'] ?>" class="btn btn-xs btn-outline-danger" onclick="return confirm('Remove this CommPortal account mapping?');">
+                                                    <i class="fa-solid fa-trash-can"></i>
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+
+                    <hr>
+                    <h6 class="fw-bold mb-2 text-dark small"><i class="fa-solid fa-plus me-1 text-muted"></i>Add CommPortal Account Mapping</h6>
+                    <form method="POST">
+                        <input type="hidden" name="dept_id" value="<?= $managed_dept['id'] ?>">
+                        <div class="mb-2">
+                            <label for="cp_phone" class="form-label small fw-semibold mb-1">CommPortal Phone Number (DirectoryNumber)</label>
+                            <input type="text" name="cp_phone" id="cp_phone" class="form-control form-control-sm" placeholder="e.g. +15550201" required>
+                        </div>
+                        <div class="mb-2 row g-2">
+                            <div class="col-sm-8">
+                                <label for="cp_pass" class="form-label small fw-semibold mb-1">CommPortal Password</label>
+                                <input type="password" name="cp_pass" id="cp_pass" class="form-control form-control-sm" placeholder="Password" required>
+                            </div>
+                            <div class="col-sm-4">
+                                <label for="cp_ext" class="form-label small fw-semibold mb-1">Extension</label>
+                                <input type="text" name="cp_ext" id="cp_ext" class="form-control form-control-sm" placeholder="e.g. 101">
+                            </div>
+                        </div>
+                        <button type="submit" name="add_commportal_account" class="btn btn-sm btn-info w-100 mt-2">
+                            <i class="fa-solid fa-plus me-1"></i>Add Phone Mapping
                         </button>
                     </form>
                 </div>

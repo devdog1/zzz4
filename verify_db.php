@@ -112,6 +112,14 @@ $expected_schema = [
         'department_id' => ['type' => 'int', 'key' => 'PRI'],
         'zabbix_usrgrp_id' => ['type' => 'bigint', 'key' => 'PRI'],
         'last_oncall_userid' => ['type' => 'bigint'],
+    ],
+    'commportal_accounts' => [
+        'id' => ['type' => 'int', 'key' => 'PRI'],
+        'department_id' => ['type' => 'int'],
+        'phone_number' => ['type' => 'varchar'],
+        'password' => ['type' => 'varchar'],
+        'ext' => ['type' => 'varchar'],
+        'last_forwarded_phone' => ['type' => 'varchar'],
     ]
 ];
 
