@@ -163,38 +163,14 @@ class CommPortal
 
     public function getUnconditionalCallForwarding()
     {
-        $cb = time() . '000'; // Unix timestamp with milliseconds
-        $URL = $this->baseURL_ . "session" . $this->sessionID_ . "/line/data?version=9.6.50&callback=dataObjectManager.callback&data=Meta_Subscriber_CallWaiting,Meta_Subscriber_UC9000_ForwardingDestinations,Meta_Subscriber_UnconditionalCallForwarding&ContextInfo=version%3D9.6.50&cb=" . $cb;
-
+        $URL = $this->baseURL_ . "session" . $this->sessionID_ . "/line/data.js?data=Meta_Subscriber_UnconditionalCallForwarding";
         $rest = new RestClient();
         $rest->endpoint = $URL;
         $rest->method = "GETJSON";
         $response = $rest->sendCurl();
 
         if ($response['http_code'] == 200) {
-            $body = trim($response['body']);
-
-            // Strip the JSONP callback wrapper to parse as valid JSON array
-            $start = strpos($body, '(');
-            $end = strrpos($body, ')');
-            if ($start !== false && $end !== false) {
-                $inner = substr($body, $start + 1, $end - $start - 1);
-                $json_array_str = '[' . $inner . ']';
-                $decoded_args = json_decode($json_array_str, true);
-                if ($decoded_args && isset($decoded_args[2])) {
-                    // The third argument is the actual UnconditionalCallForwarding data structure
-                    return $decoded_args[2];
-                }
-            }
-
-            // Fallback: try to find anything like {"Subscribed":...} or similar
-            if (preg_match('/(\{.*?\})/s', $body, $matches)) {
-                $decoded = json_decode($matches[1], true);
-                if ($decoded) {
-                    return $decoded;
-                }
-            }
-            return null;
+            return json_decode($response['body'], true);
         } else {
             $this->state_ = "Failed";
             return null;
@@ -203,7 +179,7 @@ class CommPortal
 
     public function setUnconditionalCallForwarding($data)
     {
-        $URL = $this->baseURL_ . "session" . $this->sessionID_ . "/line/data";
+        $URL = $this->baseURL_ . "session" . $this->sessionID_ . "/line/data.js";
 
         // Send back the whole data array with the updated values as requested
         $rest = new RestClient();
