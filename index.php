@@ -34,6 +34,97 @@ function get_current_on_call($department_id, $now) {
 <div class="row">
     <!-- Main Left Column: Departments Coverage -->
     <div class="col-lg-8">
+        <?php if ($current_user_id): ?>
+            <!-- Personalized User Panel -->
+            <?php
+            // 1. Get user's next and upcoming shifts
+            $end_of_year = date('Y-m-d H:i:s', $now + (365 * 24 * 3600));
+            $user_upcoming = get_final_schedule_for_user($current_user_id, $now_str, $end_of_year);
+            // Limit to next 3 shifts
+            $my_next_shifts = array_slice($user_upcoming, 0, 3);
+
+            // 2. Get open trades available to them in their departments
+            $db = get_oncall_db();
+            $stmt = $db->prepare("SELECT department_id FROM department_users WHERE user_id = ?");
+            $stmt->execute([$current_user_id]);
+            $my_depts = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+            $available_trades_count = 0;
+            if (!empty($my_depts)) {
+                foreach ($my_depts as $d_id) {
+                    $trades = get_trade_requests_by_department($d_id);
+                    foreach ($trades as $t) {
+                        // Open trade where user is NOT the proposer
+                        if ($t['status'] === 'open' && $t['proposing_user_id'] != $current_user_id) {
+                            $available_trades_count++;
+                        }
+                    }
+                }
+            }
+            ?>
+            <div class="card bg-light border-primary mb-4">
+                <div class="card-body">
+                    <div class="row">
+                        <!-- Left: Next Shifts -->
+                        <div class="col-md-7 border-end">
+                            <h4 class="h5 text-primary mb-3"><i class="fa-solid fa-calendar-check me-2"></i>Your Next On-Call Shifts</h4>
+                            <?php if (empty($my_next_shifts)): ?>
+                                <p class="text-muted small mb-0">You have no upcoming on-call shifts scheduled for the next 365 days.</p>
+                            <?php else: ?>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-hover mb-0 small">
+                                        <thead>
+                                            <tr class="text-muted">
+                                                <th>Department</th>
+                                                <th>Starts</th>
+                                                <th>Ends</th>
+                                                <th>Type</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($my_next_shifts as $sh): ?>
+                                                <tr>
+                                                    <td class="fw-semibold"><?= htmlspecialchars($sh['department_name']) ?></td>
+                                                    <td><code><?= date('M d, H:i', $sh['start']) ?></code></td>
+                                                    <td><code><?= date('M d, H:i', $sh['end']) ?></code></td>
+                                                    <td>
+                                                        <?php if ($sh['is_override']): ?>
+                                                            <span class="badge bg-warning text-dark">Override</span>
+                                                        <?php else: ?>
+                                                            <span class="badge bg-light text-secondary">Rotation</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <!-- Right: Open Trades Notification -->
+                        <div class="col-md-5 ps-md-4 d-flex flex-column justify-content-center">
+                            <h4 class="h5 text-dark mb-2"><i class="fa-solid fa-right-left me-2"></i>Shift Trades</h4>
+                            <?php if ($available_trades_count > 0): ?>
+                                <div class="alert alert-info py-2 px-3 mb-0 small">
+                                    <i class="fa-solid fa-circle-info me-1"></i>
+                                    There <strong><?= $available_trades_count === 1 ? 'is 1 open shift' : "are {$available_trades_count} open shifts" ?></strong> available for trade in your groups!
+                                    <div class="text-end mt-2">
+                                        <a href="trades.php" class="btn btn-xs btn-primary font-weight-bold" style="font-size: 0.75rem;"><i class="fa-solid fa-arrow-right me-1"></i>Go to Trade Center</a>
+                                    </div>
+                                </div>
+                            <?php else: ?>
+                                <p class="text-muted small mb-0">There are no open shift trade requests in your departments right now.</p>
+                                <div class="text-end mt-2">
+                                    <a href="trades.php" class="text-decoration-none small"><i class="fa-solid fa-arrow-right me-1"></i>Propose a trade</a>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        <?php endif; ?>
+
         <h3 class="h4 mb-3"><i class="fa-solid fa-shield-halved me-2"></i>Department Live Coverage</h3>
 
         <?php if (empty($departments)): ?>
