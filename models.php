@@ -102,8 +102,12 @@ function sync_zabbix_users() {
     $zabbix_db = get_zabbix_db();
     $oncall_db = get_oncall_db();
 
-    // Fetch users from Zabbix
-    $stmt = $zabbix_db->query("SELECT userid, username, name, surname FROM users");
+    // Fetch users from Zabbix with phone numbers from media type 4
+    $stmt = $zabbix_db->query("
+        SELECT u.userid, u.username, u.name, u.surname, m.sendto AS phone
+        FROM users u
+        LEFT JOIN media m ON u.userid = m.userid AND m.mediatypeid = 4
+    ");
     $zabbix_users = $stmt->fetchAll();
 
     $synced_count = 0;
@@ -119,7 +123,7 @@ function sync_zabbix_users() {
         if ($existing) {
             $update_stmt = $oncall_db->prepare("
                 UPDATE users
-                SET username = ?, name = ?, surname = ?, email = ?
+                SET username = ?, name = ?, surname = ?, email = ?, phone = ?
                 WHERE zabbix_userid = ?
             ");
             $update_stmt->execute([
@@ -127,6 +131,7 @@ function sync_zabbix_users() {
                 $z_user['name'],
                 $z_user['surname'],
                 $email,
+                $z_user['phone'], // Sync phone number
                 $z_user['userid']
             ]);
         } else {
@@ -136,29 +141,31 @@ function sync_zabbix_users() {
             $existing_by_username = $check_by_username_stmt->fetch();
 
             if ($existing_by_username) {
-                // Match found! Update their zabbix_userid, name, surname, and keep username as email
+                // Match found! Update their zabbix_userid, name, surname, phone and keep username as email
                 $update_stmt = $oncall_db->prepare("
                     UPDATE users
-                    SET zabbix_userid = ?, name = ?, surname = ?
+                    SET zabbix_userid = ?, name = ?, surname = ?, phone = ?
                     WHERE id = ?
                 ");
                 $update_stmt->execute([
                     $z_user['userid'],
                     $z_user['name'],
                     $z_user['surname'],
+                    $z_user['phone'], // Sync phone number
                     $existing_by_username['id']
                 ]);
             } else {
                 $insert_stmt = $oncall_db->prepare("
-                    INSERT INTO users (zabbix_userid, username, name, surname, email)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO users (zabbix_userid, username, name, surname, email, phone)
+                    VALUES (?, ?, ?, ?, ?, ?)
                 ");
                 $insert_stmt->execute([
                     $z_user['userid'],
                     $email, // Use full email for username to align with Azure AD
                     $z_user['name'],
                     $z_user['surname'],
-                    $email
+                    $email,
+                    $z_user['phone'] // Sync phone number
                 ]);
                 $synced_count++;
             }

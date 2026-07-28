@@ -21,6 +21,20 @@ INSERT IGNORE INTO users (userid, username, name, surname) VALUES
 (6, 'frank', 'Frank', 'Wright'),
 (7, 'grace', 'Grace', 'Davis');
 
+CREATE TABLE IF NOT EXISTS media (
+    mediaid BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    userid BIGINT NOT NULL,
+    mediatypeid BIGINT NOT NULL,
+    sendto VARCHAR(100) NOT NULL
+);
+
+INSERT IGNORE INTO media (userid, mediatypeid, sendto) VALUES
+(1, 4, '+1-555-0101'),
+(2, 4, '+1-555-0102'),
+(3, 4, '+1-555-0103'),
+(4, 3, 'pager_address'),
+(5, 4, '+1-555-0105');
+
 -- 2. Create On-Call System Database & Schema
 CREATE DATABASE IF NOT EXISTS oncall_system;
 USE oncall_system;

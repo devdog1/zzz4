@@ -231,6 +231,8 @@ if ($manage_id) {
                                     <th>Department Name</th>
                                     <th>Group Manager</th>
                                     <th>Team Size</th>
+                                    <th>Zabbix Group Map</th>
+                                    <th>NOC Mode</th>
                                     <th class="text-end">Actions</th>
                                 </tr>
                             </thead>
@@ -245,6 +247,10 @@ if ($manage_id) {
                                         : '<span class="text-danger fw-semibold small"><i class="fa-solid fa-triangle-exclamation me-1"></i>No Manager Assigned</span>';
 
                                     $is_mgr_or_admin = can_manage_department($dept['id']);
+
+                                    // Fetch Zabbix Group IDs for this department
+                                    $z_groups = get_department_zabbix_groups($dept['id']);
+                                    $z_groups_str = !empty($z_groups) ? implode(', ', $z_groups) : 'None';
                                     ?>
                                     <tr class="<?= $is_current ? 'table-primary' : '' ?>">
                                         <td class="fw-bold">#<?= $dept['id'] ?></td>
@@ -256,6 +262,16 @@ if ($manage_id) {
                                         </td>
                                         <td>
                                             <span class="badge bg-secondary rounded-pill"><?= $size ?> members</span>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-light text-dark border"><?= htmlspecialchars($z_groups_str) ?></span>
+                                        </td>
+                                        <td>
+                                            <?php if ($dept['noc_mode']): ?>
+                                                <span class="badge bg-danger">ENABLED</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-secondary text-white">DISABLED</span>
+                                            <?php endif; ?>
                                         </td>
                                         <td class="text-end">
                                             <?php if ($is_mgr_or_admin): ?>
