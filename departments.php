@@ -43,6 +43,51 @@ if (isset($_POST['create_dept'])) {
     }
 }
 
+// Handle updating NOC Mode configuration
+if (isset($_POST['save_noc_config'])) {
+    $dept_id = (int)$_POST['dept_id'];
+    if (!can_manage_department($dept_id)) {
+        $error = 'Unauthorized: Only the designated On-Call Manager or Admin can configure NOC Mode.';
+    } else {
+        $noc_mode_val = isset($_POST['noc_mode']) ? 1 : 0;
+        $hours_data = $_POST['hours'] ?? [];
+
+        $db = get_oncall_db();
+        $db->beginTransaction();
+        try {
+            // Update noc_mode on department
+            $stmt = $db->prepare("UPDATE departments SET noc_mode = ? WHERE id = ?");
+            $stmt->execute([$noc_mode_val, $dept_id]);
+
+            // Update hours
+            $stmt = $db->prepare("
+                INSERT INTO noc_business_hours (day_of_week, start_time, end_time)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE start_time = VALUES(start_time), end_time = VALUES(end_time)
+            ");
+            foreach ($hours_data as $day => $times) {
+                $stmt->execute([
+                    (int)$day,
+                    $times['start'] . ':00',
+                    $times['end'] . ':00'
+                ]);
+            }
+            $db->commit();
+
+            log_action('UPDATE_NOC_CONFIG', [
+                'department_id' => $dept_id,
+                'noc_mode_enabled' => $noc_mode_val,
+                'hours' => $hours_data
+            ]);
+
+            $message = "NOC Mode configuration saved successfully!";
+        } catch (Exception $e) {
+            $db->rollBack();
+            $error = "Failed to save NOC configuration: " . $e->getMessage();
+        }
+    }
+}
+
 // Handle updating Zabbix User Group mappings
 if (isset($_POST['update_zabbix_groups'])) {
     $dept_id = (int)$_POST['dept_id'];
@@ -330,6 +375,64 @@ if ($manage_id) {
                         </div>
                         <button type="submit" name="update_zabbix_groups" class="btn btn-sm btn-outline-primary w-100">
                             <i class="fa-solid fa-save me-1"></i>Update Zabbix Groups Mapping
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- NOC Mode Configuration (Manager or Admin) -->
+            <div class="card mt-3 border-danger">
+                <div class="card-header bg-danger text-white fw-bold">
+                    <i class="fa-solid fa-headset me-2"></i>NOC Mode Configuration
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        <input type="hidden" name="dept_id" value="<?= $managed_dept['id'] ?>">
+
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" name="noc_mode" id="noc_mode" value="1" <?= $managed_dept['noc_mode'] ? 'checked' : '' ?>>
+                            <label class="form-check-label fw-bold text-danger" for="noc_mode">Enable NOC Mode</label>
+                            <div class="form-text small">When enabled, the active on-call user is automatically switched to the NOC User during designated business hours, over-ruling rotations and overrides.</div>
+                        </div>
+
+                        <hr>
+                        <h6 class="fw-bold mb-3 text-dark"><i class="fa-solid fa-clock me-1 text-muted"></i>NOC Daily Business Hours</h6>
+                        <?php
+                        $hours_stmt = $db->query("SELECT * FROM noc_business_hours ORDER BY day_of_week ASC");
+                        $hours_map = [];
+                        foreach ($hours_stmt->fetchAll() as $h) {
+                            $hours_map[$h['day_of_week']] = $h;
+                        }
+                        $days_of_week_names = [
+                            1 => 'Monday',
+                            2 => 'Tuesday',
+                            3 => 'Wednesday',
+                            4 => 'Thursday',
+                            5 => 'Friday',
+                            6 => 'Saturday',
+                            7 => 'Sunday'
+                        ];
+                        ?>
+                        <?php for ($d = 1; $d <= 7; $d++): ?>
+                            <?php
+                            $h_start = isset($hours_map[$d]) ? substr($hours_map[$d]['start_time'], 0, 5) : '08:00';
+                            $h_end = isset($hours_map[$d]) ? substr($hours_map[$d]['end_time'], 0, 5) : '18:00';
+                            ?>
+                            <div class="row g-2 mb-2 align-items-center">
+                                <div class="col-sm-4">
+                                    <span class="small fw-semibold text-dark"><?= $days_of_week_names[$d] ?></span>
+                                </div>
+                                <div class="col-sm-4">
+                                    <input type="time" name="hours[<?= $d ?>][start]" class="form-control form-control-sm" value="<?= $h_start ?>" required>
+                                </div>
+                                <div class="col-sm-4">
+                                    <input type="time" name="hours[<?= $d ?>][end]" class="form-control form-control-sm" value="<?= $h_end ?>" required>
+                                </div>
+                            </div>
+                        <?php endfor; ?>
+
+                        <button type="submit" name="save_noc_config" class="btn btn-sm btn-danger w-100 mt-2">
+                            <i class="fa-solid fa-save me-1"></i>Save NOC Configuration
                         </button>
                     </form>
                 </div>

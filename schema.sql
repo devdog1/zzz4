@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS departments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL UNIQUE,
     manager_user_id INT DEFAULT NULL,
+    noc_mode TINYINT(1) DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
@@ -197,6 +198,10 @@ INSERT IGNORE INTO departments (id, name) VALUES
 (2, 'Development'),
 (3, 'Security');
 
+-- Seed NOC User in Users
+INSERT IGNORE INTO users (id, zabbix_userid, username, name, surname, email) VALUES
+(999, 999, 'noc@example.com', 'NOC', 'Service', 'noc@example.com');
+
 -- Settings Table
 CREATE TABLE IF NOT EXISTS settings (
     setting_key VARCHAR(100) NOT NULL PRIMARY KEY,
@@ -208,7 +213,24 @@ CREATE TABLE IF NOT EXISTS settings (
 INSERT IGNORE INTO settings (setting_key, setting_value) VALUES
 ('zabbix_default_domain', 'example.com'),
 ('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php'),
-('zabbix_api_token', 'mock_zabbix_api_token_value_here');
+('zabbix_api_token', 'mock_zabbix_api_token_value_here'),
+('noc_zabbix_userid', '999');
+
+-- NOC Business Hours Table
+CREATE TABLE IF NOT EXISTS noc_business_hours (
+    day_of_week INT NOT NULL PRIMARY KEY, -- 1 = Monday, 2 = Tuesday, ..., 7 = Sunday
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL
+);
+
+INSERT IGNORE INTO noc_business_hours (day_of_week, start_time, end_time) VALUES
+(1, '08:00:00', '18:00:00'),
+(2, '08:00:00', '18:00:00'),
+(3, '08:00:00', '18:00:00'),
+(4, '08:00:00', '18:00:00'),
+(5, '08:00:00', '18:00:00'),
+(6, '08:00:00', '18:00:00'),
+(7, '08:00:00', '18:00:00');
 
 -- Department Zabbix Groups Table
 CREATE TABLE IF NOT EXISTS department_zabbix_groups (

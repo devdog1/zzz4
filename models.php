@@ -658,6 +658,104 @@ function calculate_final_schedule($base_slots, $overrides) {
     return array_values($segments);
 }
 
+function apply_noc_mode($segments, $department_id) {
+    $dept = get_department_by_id($department_id);
+    if (!$dept || empty($dept['noc_mode'])) {
+        return $segments;
+    }
+
+    // Get NOC User info
+    $noc_z_userid = get_setting('noc_zabbix_userid', '999');
+    $db = get_oncall_db();
+    $stmt = $db->prepare("SELECT * FROM users WHERE zabbix_userid = ?");
+    $stmt->execute([$noc_z_userid]);
+    $noc_user = $stmt->fetch();
+    if (!$noc_user) {
+        $noc_user = [
+            'id' => 999,
+            'username' => 'noc@example.com',
+            'name' => 'NOC',
+            'surname' => 'Service'
+        ];
+    }
+
+    // Load NOC business hours
+    $hours_stmt = $db->query("SELECT * FROM noc_business_hours");
+    $hours = [];
+    foreach ($hours_stmt->fetchAll() as $row) {
+        $hours[$row['day_of_week']] = [
+            'start' => $row['start_time'],
+            'end' => $row['end_time']
+        ];
+    }
+
+    $sliced = [];
+    foreach ($segments as $seg) {
+        $seg_start = $seg['start'];
+        $seg_end = $seg['end'];
+
+        $current_time = $seg_start;
+        while ($current_time < $seg_end) {
+            $day_start = strtotime('midnight', $current_time);
+            $day_end = $day_start + 86400;
+
+            $chunk_start = max($seg_start, $current_time);
+            $chunk_end = min($seg_end, $day_end);
+
+            $day_of_week = date('N', $chunk_start); // 1 (Mon) - 7 (Sun)
+
+            if (isset($hours[$day_of_week])) {
+                $h_start_str = $hours[$day_of_week]['start'];
+                $h_end_str = $hours[$day_of_week]['end'];
+
+                $noc_start = strtotime(date('Y-m-d', $chunk_start) . ' ' . $h_start_str);
+                $noc_end = strtotime(date('Y-m-d', $chunk_start) . ' ' . $h_end_str);
+
+                // Zone 1: Before NOC
+                $z1_s = $chunk_start;
+                $z1_e = min($chunk_end, $noc_start);
+                if ($z1_e > $z1_s) {
+                    $sliced[] = array_merge($seg, ['start' => $z1_s, 'end' => $z1_e]);
+                }
+
+                // Zone 2: During NOC
+                $z2_s = max($chunk_start, $noc_start);
+                $z2_e = min($chunk_end, $noc_end);
+                if ($z2_e > $z2_s) {
+                    $sliced[] = [
+                        'id' => null,
+                        'start' => $z2_s,
+                        'end' => $z2_e,
+                        'user_id' => $noc_user['id'],
+                        'username' => $noc_user['username'],
+                        'name' => $noc_user['name'],
+                        'surname' => $noc_user['surname'],
+                        'is_override' => true,
+                        'description' => 'NOC Mode Active Business Hours'
+                    ];
+                }
+
+                // Zone 3: After NOC
+                $z3_s = max($chunk_start, $noc_end);
+                $z3_e = $chunk_end;
+                if ($z3_e > $z3_s) {
+                    $sliced[] = array_merge($seg, ['start' => $z3_s, 'end' => $z3_e]);
+                }
+            } else {
+                $sliced[] = array_merge($seg, ['start' => $chunk_start, 'end' => $chunk_end]);
+            }
+
+            $current_time = $day_end;
+        }
+    }
+
+    usort($sliced, function($a, $b) {
+        return $a['start'] <=> $b['start'];
+    });
+
+    return $sliced;
+}
+
 function get_final_schedule_for_department($department_id, $start_time_str, $end_time_str) {
     $db = get_oncall_db();
 
@@ -685,7 +783,8 @@ function get_final_schedule_for_department($department_id, $start_time_str, $end
     $stmt->execute([$department_id, $end_time_str, $start_time_str]);
     $overrides = $stmt->fetchAll();
 
-    return calculate_final_schedule($base_slots, $overrides);
+    $calculated = calculate_final_schedule($base_slots, $overrides);
+    return apply_noc_mode($calculated, $department_id);
 }
 
 function get_final_schedule_for_user($user_id, $start_time_str, $end_time_str) {
