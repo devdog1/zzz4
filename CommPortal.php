@@ -172,22 +172,25 @@ class CommPortal
         $response = $rest->sendCurl();
 
         if ($response['http_code'] == 200) {
-            $body = $response['body'];
+            $body = trim($response['body']);
 
-            // Extract the Meta_Subscriber_UnconditionalCallForwarding JSON block from JSONP response
-            // We search for: "Meta_Subscriber_UnconditionalCallForwarding" followed by comma, followed by a JSON object
-            $pattern = '/"Meta_Subscriber_UnconditionalCallForwarding"\s*,\s*(\{.*?\})\s*,\s*null/s';
-            if (preg_match($pattern, $body, $matches)) {
-                $decoded = json_decode($matches[1], true);
-                if ($decoded) {
-                    return $decoded;
+            // Strip the JSONP callback wrapper to parse as valid JSON array
+            $start = strpos($body, '(');
+            $end = strrpos($body, ')');
+            if ($start !== false && $end !== false) {
+                $inner = substr($body, $start + 1, $end - $start - 1);
+                $json_array_str = '[' . $inner . ']';
+                $decoded_args = json_decode($json_array_str, true);
+                if ($decoded_args && isset($decoded_args[2])) {
+                    // The third argument is the actual UnconditionalCallForwarding data structure
+                    return $decoded_args[2];
                 }
             }
 
-            // Fallback: try to find anything like {"Subscribed":...}
+            // Fallback: try to find anything like {"Subscribed":...} or similar
             if (preg_match('/(\{.*?\})/s', $body, $matches)) {
                 $decoded = json_decode($matches[1], true);
-                if (isset($decoded['Subscribed'])) {
+                if ($decoded) {
                     return $decoded;
                 }
             }
@@ -202,15 +205,11 @@ class CommPortal
     {
         $URL = $this->baseURL_ . "session" . $this->sessionID_ . "/line/data";
 
-        // Structure the payload inside "Meta_Subscriber_UnconditionalCallForwarding" as expected by CommPortal
-        $payload = [
-            "Meta_Subscriber_UnconditionalCallForwarding" => $data
-        ];
-
+        // Send back the whole data array with the updated values as requested
         $rest = new RestClient();
         $rest->endpoint = $URL;
         $rest->method = "POSTJSON";
-        $rest->payloadArr = $payload;
+        $rest->payloadArr = $data;
         $response = $rest->sendCurl();
         return $response['http_code'] == 200;
     }

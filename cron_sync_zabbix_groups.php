@@ -119,16 +119,24 @@ try {
                                 $clean_phone = preg_replace('/[^0-9]/', '', $active_user_phone);
                                 $prefixed_phone = "9" . $clean_phone;
 
-                                // Build / Update the structure matching CommPortal version 9.6.50
-                                $cf['Enabled']['_'] = true;
-                                if (!isset($cf['OverridableNumber'])) {
-                                    $cf['OverridableNumber'] = [];
+                                // Build / Update the exact three data values in the array as requested
+                                if (!isset($cf['data'])) {
+                                    $cf['data'] = [];
                                 }
-                                if (!isset($cf['OverridableNumber']['Value'])) {
-                                    $cf['OverridableNumber']['Value'] = [];
+                                if (!isset($cf['data'][0])) {
+                                    $cf['data'][0] = [];
                                 }
-                                $cf['OverridableNumber']['Value']['_'] = $prefixed_phone;
-                                $cf['OverridableNumber']['UseDefault']['_'] = false;
+                                if (!isset($cf['data'][0]['data'])) {
+                                    $cf['data'][0]['data'] = [];
+                                }
+
+                                $cf['data'][0]['data']['Number'] = $prefixed_phone;
+                                $cf['data'][0]['data']['Enabled'] = true;
+
+                                if (!isset($cf['data'][0]['data']['OverridableNumber'])) {
+                                    $cf['data'][0]['data']['OverridableNumber'] = [];
+                                }
+                                $cf['data'][0]['data']['OverridableNumber']['Value'] = $prefixed_phone;
 
                                 $success = $cp->setUnconditionalCallForwarding($cf);
                                 if ($success) {
