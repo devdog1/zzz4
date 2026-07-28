@@ -206,4 +206,15 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 INSERT IGNORE INTO settings (setting_key, setting_value) VALUES
-('zabbix_default_domain', 'example.com');
+('zabbix_default_domain', 'example.com'),
+('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php'),
+('zabbix_api_token', 'mock_zabbix_api_token_value_here');
+
+-- Department Zabbix Groups Table
+CREATE TABLE IF NOT EXISTS department_zabbix_groups (
+    department_id INT NOT NULL,
+    zabbix_usrgrp_id BIGINT NOT NULL,
+    last_oncall_userid BIGINT DEFAULT NULL,
+    PRIMARY KEY (department_id, zabbix_usrgrp_id),
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
+);

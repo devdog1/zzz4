@@ -43,6 +43,33 @@ if (isset($_POST['create_dept'])) {
     }
 }
 
+// Handle updating Zabbix User Group mappings
+if (isset($_POST['update_zabbix_groups'])) {
+    $dept_id = (int)$_POST['dept_id'];
+    if (!can_manage_department($dept_id)) {
+        $error = 'Unauthorized: Only the designated On-Call Manager or Admin can manage Zabbix group mappings.';
+    } else {
+        $groups_str = $_POST['zabbix_groups'] ?? '';
+        // Extract numeric group IDs
+        $grp_ids = [];
+        if (trim($groups_str) !== '') {
+            $parts = explode(',', $groups_str);
+            foreach ($parts as $p) {
+                $trimmed = trim($p);
+                if (is_numeric($trimmed)) {
+                    $grp_ids[] = (int)$trimmed;
+                }
+            }
+        }
+        try {
+            save_department_zabbix_groups($dept_id, $grp_ids);
+            $message = "Zabbix User Group mappings updated successfully!";
+        } catch (Exception $e) {
+            $error = "Failed to update Zabbix User Group mappings: " . $e->getMessage();
+        }
+    }
+}
+
 // Handle updating department manager (Admin only)
 if (isset($_POST['update_manager'])) {
     if (!has_permission('manage_departments')) {
@@ -283,6 +310,30 @@ if ($manage_id) {
                     </div>
                 </div>
             <?php endif; ?>
+
+            <!-- Map to Zabbix User Groups (Manager or Admin) -->
+            <div class="card mt-3">
+                <div class="card-header bg-white fw-bold text-dark">
+                    <i class="fa-solid fa-network-wired me-2 text-primary"></i>Map Zabbix User Groups
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        <input type="hidden" name="dept_id" value="<?= $managed_dept['id'] ?>">
+                        <div class="mb-3">
+                            <label for="zabbix_groups" class="form-label small fw-semibold">Zabbix User Group IDs (comma-separated)</label>
+                            <?php
+                            $mapped_groups = get_department_zabbix_groups($managed_dept['id']);
+                            $mapped_str = implode(', ', $mapped_groups);
+                            ?>
+                            <input type="text" name="zabbix_groups" id="zabbix_groups" class="form-control form-control-sm" placeholder="e.g. 7, 12, 15" value="<?= htmlspecialchars($mapped_str) ?>">
+                            <div class="form-text small text-muted">Associate this department with one or more Zabbix user group IDs. The active on-call user will be kept in sync inside these groups.</div>
+                        </div>
+                        <button type="submit" name="update_zabbix_groups" class="btn btn-sm btn-outline-primary w-100">
+                            <i class="fa-solid fa-save me-1"></i>Update Zabbix Groups Mapping
+                        </button>
+                    </form>
+                </div>
+            </div>
 
         <?php else: ?>
             <!-- Create Department Form (Admin Only) -->

@@ -1,0 +1,88 @@
+<?php
+// cron_sync_zabbix_groups.php - Run every minute via cron to sync active on-call user to mapped Zabbix groups.
+
+require_once __DIR__ . '/models.php';
+
+echo "[" . date('Y-m-d H:i:s') . "] Starting Zabbix User Group sync...\n";
+
+try {
+    $db = get_oncall_db();
+    $departments = get_all_departments();
+    $now = time();
+    $now_str = date('Y-m-d H:i:s', $now);
+
+    // Define a small range around the current time to query the active slot/override
+    $start_str = date('Y-m-d H:i:s', $now - 10);
+    $end_str = date('Y-m-d H:i:s', $now + 10);
+
+    foreach ($departments as $dept) {
+        $dept_id = $dept['id'];
+
+        // 1. Get mapped Zabbix group records for this department
+        $stmt = $db->prepare("
+            SELECT zabbix_usrgrp_id, last_oncall_userid
+            FROM department_zabbix_groups
+            WHERE department_id = ?
+        ");
+        $stmt->execute([$dept_id]);
+        $mappings = $stmt->fetchAll();
+
+        if (empty($mappings)) {
+            continue;
+        }
+
+        // 2. Fetch current on-call user for this department
+        $segments = get_final_schedule_for_department($dept_id, $start_str, $end_str);
+        $active_user = null;
+        foreach ($segments as $seg) {
+            if ($now >= $seg['start'] && $now <= $seg['end']) {
+                $active_user = $seg;
+                break;
+            }
+        }
+
+        if ($active_user) {
+            // Retrieve their Zabbix userid
+            $u_stmt = $db->prepare("SELECT zabbix_userid FROM users WHERE id = ?");
+            $u_stmt->execute([$active_user['user_id']]);
+            $u_res = $u_stmt->fetch();
+            $z_userid = $u_res ? $u_res['zabbix_userid'] : null;
+
+            if (!$z_userid) {
+                echo "Warning: Active on-call user '{$active_user['name']} {$active_user['surname']}' does not have a linked Zabbix User ID.\n";
+                continue;
+            }
+
+            // 3. For each mapped group, see if update is needed
+            foreach ($mappings as $map) {
+                $usrgrp_id = $map['zabbix_usrgrp_id'];
+                $last_z_userid = $map['last_oncall_userid'];
+
+                if ($z_userid != $last_z_userid) {
+                    echo "Syncing group {$usrgrp_id}: On-Call changed from user ID '{$last_z_userid}' to '{$z_userid}'\n";
+
+                    $success = trigger_zabbix_user_group_update($usrgrp_id, $z_userid);
+                    if ($success) {
+                        // Update cache
+                        $up_stmt = $db->prepare("
+                            UPDATE department_zabbix_groups
+                            SET last_oncall_userid = ?
+                            WHERE department_id = ? AND zabbix_usrgrp_id = ?
+                        ");
+                        $up_stmt->execute([$z_userid, $dept_id, $usrgrp_id]);
+                        echo "Successfully updated Zabbix user group {$usrgrp_id} members to user ID {$z_userid}.\n";
+                    } else {
+                        echo "Error: Failed to call Zabbix API to update user group {$usrgrp_id}.\n";
+                    }
+                }
+            }
+        } else {
+            echo "No active on-call user scheduled right now for department '{$dept['name']}'.\n";
+        }
+    }
+
+} catch (Exception $e) {
+    echo "Error during Zabbix User Group sync: " . $e->getMessage() . "\n";
+}
+
+echo "[" . date('Y-m-d H:i:s') . "] Zabbix User Group sync finished.\n";

@@ -223,6 +223,84 @@ function create_department($name, $manager_user_id = null) {
     return $res;
 }
 
+function get_department_zabbix_groups($department_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("SELECT zabbix_usrgrp_id FROM department_zabbix_groups WHERE department_id = ?");
+    $stmt->execute([$department_id]);
+    return $stmt->fetchAll(PDO::FETCH_COLUMN);
+}
+
+function save_department_zabbix_groups($department_id, $zabbix_group_ids) {
+    $db = get_oncall_db();
+    $db->beginTransaction();
+    try {
+        $stmt = $db->prepare("DELETE FROM department_zabbix_groups WHERE department_id = ?");
+        $stmt->execute([$department_id]);
+
+        if (!empty($zabbix_group_ids)) {
+            $stmt = $db->prepare("INSERT INTO department_zabbix_groups (department_id, zabbix_usrgrp_id) VALUES (?, ?)");
+            foreach ($zabbix_group_ids as $grp_id) {
+                if (is_numeric($grp_id)) {
+                    $stmt->execute([$department_id, (int)$grp_id]);
+                }
+            }
+        }
+        $db->commit();
+
+        log_action('UPDATE_DEPARTMENT_ZABBIX_GROUPS', [
+            'department_id' => $department_id,
+            'zabbix_group_ids' => $zabbix_group_ids
+        ]);
+
+        return true;
+    } catch (Exception $e) {
+        $db->rollBack();
+        throw $e;
+    }
+}
+
+function trigger_zabbix_user_group_update($usrgrp_id, $zabbix_userid) {
+    $api_url = get_setting('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php');
+    $api_token = get_setting('zabbix_api_token', '');
+
+    $payload = [
+        'jsonrpc' => '2.0',
+        'method' => 'usergroup.update',
+        'params' => [
+            'usrgrpid' => (string)$usrgrp_id,
+            'users' => [
+                ['userid' => (string)$zabbix_userid]
+            ]
+        ],
+        'id' => 1
+    ];
+
+    if (!empty($api_token)) {
+        $payload['auth'] = $api_token;
+    }
+
+    $options = [
+        'http' => [
+            'header'  => "Content-Type: application/json-rpc\r\n",
+            'method'  => 'POST',
+            'content' => json_encode($payload),
+            'timeout' => 5
+        ]
+    ];
+
+    $context  = stream_context_create($options);
+    $result = @file_get_contents($api_url, false, $context);
+
+    log_action('ZABBIX_API_USERGROUP_UPDATE', [
+        'usrgrpid' => $usrgrp_id,
+        'userid' => $zabbix_userid,
+        'payload' => $payload,
+        'response' => $result ? json_decode($result, true) : null
+    ]);
+
+    return $result !== false;
+}
+
 function is_user_in_department($user_id, $department_id) {
     $db = get_oncall_db();
     $stmt = $db->prepare("SELECT 1 FROM department_users WHERE user_id = ? AND department_id = ?");
