@@ -163,13 +163,35 @@ class CommPortal
 
     public function getUnconditionalCallForwarding()
     {
-        $URL = $this->baseURL_ . "session" . $this->sessionID_ . "/line/data.js?data=Meta_Subscriber_UnconditionalCallForwarding";
+        $cb = time() . '000'; // Unix timestamp with milliseconds
+        $URL = $this->baseURL_ . "session" . $this->sessionID_ . "/line/data?version=9.6.50&callback=dataObjectManager.callback&data=Meta_Subscriber_CallWaiting,Meta_Subscriber_UC9000_ForwardingDestinations,Meta_Subscriber_UnconditionalCallForwarding&ContextInfo=version%3D9.6.50&cb=" . $cb;
+
         $rest = new RestClient();
         $rest->endpoint = $URL;
         $rest->method = "GETJSON";
         $response = $rest->sendCurl();
+
         if ($response['http_code'] == 200) {
-            return json_decode($response['body'], true);
+            $body = $response['body'];
+
+            // Extract the Meta_Subscriber_UnconditionalCallForwarding JSON block from JSONP response
+            // We search for: "Meta_Subscriber_UnconditionalCallForwarding" followed by comma, followed by a JSON object
+            $pattern = '/"Meta_Subscriber_UnconditionalCallForwarding"\s*,\s*(\{.*?\})\s*,\s*null/s';
+            if (preg_match($pattern, $body, $matches)) {
+                $decoded = json_decode($matches[1], true);
+                if ($decoded) {
+                    return $decoded;
+                }
+            }
+
+            // Fallback: try to find anything like {"Subscribed":...}
+            if (preg_match('/(\{.*?\})/s', $body, $matches)) {
+                $decoded = json_decode($matches[1], true);
+                if (isset($decoded['Subscribed'])) {
+                    return $decoded;
+                }
+            }
+            return null;
         } else {
             $this->state_ = "Failed";
             return null;
@@ -178,11 +200,17 @@ class CommPortal
 
     public function setUnconditionalCallForwarding($data)
     {
-        $URL = $this->baseURL_ . "session" . $this->sessionID_ . "/line/data.js";
+        $URL = $this->baseURL_ . "session" . $this->sessionID_ . "/line/data";
+
+        // Structure the payload inside "Meta_Subscriber_UnconditionalCallForwarding" as expected by CommPortal
+        $payload = [
+            "Meta_Subscriber_UnconditionalCallForwarding" => $data
+        ];
+
         $rest = new RestClient();
         $rest->endpoint = $URL;
         $rest->method = "POSTJSON";
-        $rest->payloadArr = $data;
+        $rest->payloadArr = $payload;
         $response = $rest->sendCurl();
         return $response['http_code'] == 200;
     }

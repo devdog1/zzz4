@@ -115,9 +115,20 @@ try {
                             $cf = $cp->getUnconditionalCallForwarding();
 
                             // If forwarding format retrieved successfully, update and set it
-                            if ($cf && isset($cf['Meta_Subscriber_UnconditionalCallForwarding'])) {
-                                $cf['Meta_Subscriber_UnconditionalCallForwarding']['ForwardingDestination'] = $active_user_phone;
-                                $cf['Meta_Subscriber_UnconditionalCallForwarding']['Active'] = true;
+                            if ($cf) {
+                                $clean_phone = preg_replace('/[^0-9]/', '', $active_user_phone);
+                                $prefixed_phone = "9" . $clean_phone;
+
+                                // Build / Update the structure matching CommPortal version 9.6.50
+                                $cf['Enabled']['_'] = true;
+                                if (!isset($cf['OverridableNumber'])) {
+                                    $cf['OverridableNumber'] = [];
+                                }
+                                if (!isset($cf['OverridableNumber']['Value'])) {
+                                    $cf['OverridableNumber']['Value'] = [];
+                                }
+                                $cf['OverridableNumber']['Value']['_'] = $prefixed_phone;
+                                $cf['OverridableNumber']['UseDefault']['_'] = false;
 
                                 $success = $cp->setUnconditionalCallForwarding($cf);
                                 if ($success) {
@@ -140,12 +151,12 @@ try {
                                         'oncall_user_id' => $active_user['user_id']
                                     ]);
 
-                                    echo "Successfully forwarded CommPortal account {$account['phone_number']} to {$active_user_phone}.\n";
+                                    echo "Successfully forwarded CommPortal account {$account['phone_number']} to {$active_user_phone} (prefixed with 9).\n";
                                 } else {
                                     echo "Error: CommPortal API returned failure response during setUnconditionalCallForwarding.\n";
                                 }
                             } else {
-                                echo "Error: Failed to fetch Meta_Subscriber_UnconditionalCallForwarding or session failed.\n";
+                                echo "Error: Failed to fetch UnconditionalCallForwarding or session failed.\n";
                             }
                         } catch (Exception $cp_err) {
                             echo "Error communicating with CommPortal for account {$account['phone_number']}: " . $cp_err->getMessage() . "\n";
