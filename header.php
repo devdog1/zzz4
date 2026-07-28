@@ -103,6 +103,9 @@ $user_roles_str = implode(', ', array_map('ucfirst', $user_roles));
                     <li class="nav-item">
                         <a class="nav-link" href="logs.php"><i class="fa-solid fa-receipt me-1"></i> Audit Trail</a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="verify_db.php"><i class="fa-solid fa-stethoscope me-1"></i> DB Verify</a>
+                    </li>
                 <?php endif; ?>
                 <?php if ($can_generate_rotation): ?>
                     <li class="nav-item">

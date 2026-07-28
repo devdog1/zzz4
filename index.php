@@ -320,6 +320,9 @@ function get_current_on_call($department_id, $now) {
                     <a href="sync.php" class="list-group-item list-group-item-action">
                         <i class="fa-solid fa-arrows-rotate text-success me-2"></i> Sync Users from Zabbix
                     </a>
+                    <a href="verify_db.php" class="list-group-item list-group-item-action">
+                        <i class="fa-solid fa-stethoscope text-primary me-2"></i> Database Diagnostics
+                    </a>
                 <?php endif; ?>
                 <a href="calendar.php" class="list-group-item list-group-item-action">
                     <i class="fa-solid fa-calendar-days text-info me-2"></i> View Schedules Calendar
