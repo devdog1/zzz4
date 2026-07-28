@@ -310,6 +310,9 @@ function get_current_on_call($department_id, $now) {
                     <a href="generate.php" class="list-group-item list-group-item-action">
                         <i class="fa-solid fa-calendar-plus text-primary me-2"></i> Generate 365-Day Schedule
                     </a>
+                    <a href="commportal_mgmt.php" class="list-group-item list-group-item-action">
+                        <i class="fa-solid fa-phone text-info me-2"></i> CommPortal Telephony Sync
+                    </a>
                 <?php endif; ?>
                 <?php if ($can_override): ?>
                     <a href="overrides.php?action=new" class="list-group-item list-group-item-action">

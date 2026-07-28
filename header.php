@@ -95,6 +95,9 @@ $user_roles_str = implode(', ', array_map('ucfirst', $user_roles));
                     <li class="nav-item">
                         <a class="nav-link" href="departments.php"><i class="fa-solid fa-sitemap me-1"></i> Departments</a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="commportal_mgmt.php"><i class="fa-solid fa-phone me-1"></i> Telephony Sync</a>
+                    </li>
                 <?php endif; ?>
                 <?php if (has_permission('manage_departments')): ?>
                     <li class="nav-item">

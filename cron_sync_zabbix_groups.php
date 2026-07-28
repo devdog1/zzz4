@@ -3,6 +3,20 @@
 
 require_once __DIR__ . '/models.php';
 
+// Parse command line options for verbose flag
+$verbose = false;
+if (isset($argv)) {
+    foreach ($argv as $arg) {
+        if ($arg === '--verbose' || $arg === '-v') {
+            $verbose = true;
+        }
+    }
+}
+if ($verbose) {
+    $GLOBALS['commportal_verbose'] = true;
+    echo "[VERBOSE] Verbose logging enabled. Diagnostic logs will be printed to stdout.\n";
+}
+
 echo "[" . date('Y-m-d H:i:s') . "] Starting On-Call Synchronization (Zabbix + CommPortal)...\n";
 
 try {

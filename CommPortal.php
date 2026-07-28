@@ -9,6 +9,15 @@ class RestClient
 
     public function sendCurl()
     {
+        $verbose = !empty($GLOBALS['commportal_verbose']);
+
+        if ($verbose) {
+            echo "[VERBOSE RestClient] Initiating {$this->method} request to endpoint: {$this->endpoint}\n";
+            if ($this->payloadArr) {
+                echo "[VERBOSE RestClient] Payload: " . json_encode($this->payloadArr) . "\n";
+            }
+        }
+
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $this->endpoint);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -28,6 +37,11 @@ class RestClient
         $body = curl_exec($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
+        if ($verbose) {
+            echo "[VERBOSE RestClient] Response HTTP Code: {$http_code}\n";
+            echo "[VERBOSE RestClient] Response Body: {$body}\n";
+        }
 
         return [
             'http_code' => $http_code,
@@ -81,6 +95,11 @@ class CommPortal
 
     private function login()
     {
+        $verbose = !empty($GLOBALS['commportal_verbose']);
+        if ($verbose) {
+            echo "[VERBOSE CommPortal] Logging in user: {$this->phoneNumber_}...\n";
+        }
+
         $URL = $this->baseURL_ . "login?version=9.5.40";
         $rest = new RestClient();
         $rest->endpoint = $URL;
@@ -100,14 +119,26 @@ class CommPortal
                 if (!empty($session)) {
                     $this->sessionID_ = $session;
                     $this->state_ = "loggedIn";
+                    if ($verbose) {
+                        echo "[VERBOSE CommPortal] Login successful! Session ID established: {$this->sessionID_}\n";
+                    }
                 } else {
                     $this->state_ = "Failed";
+                    if ($verbose) {
+                        echo "[VERBOSE CommPortal] Login failed: Session key is empty in body.\n";
+                    }
                 }
             } else {
                 $this->state_ = "Failed";
+                if ($verbose) {
+                    echo "[VERBOSE CommPortal] Login failed: Response did not contain separator character.\n";
+                }
             }
         } else {
             $this->state_ = "Failed";
+            if ($verbose) {
+                echo "[VERBOSE CommPortal] Login failed: HTTP code is not 200.\n";
+            }
         }
     }
 
