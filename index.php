@@ -100,6 +100,13 @@ function get_current_on_call($department_id, $now) {
                                     </table>
                                 </div>
                             <?php endif; ?>
+
+                            <div class="mt-3">
+                                <button class="btn btn-xs btn-outline-primary" onclick="copyICalFeed('<?= $current_user_id ?>')" style="font-size: 0.75rem;">
+                                    <i class="fa-solid fa-calendar-plus me-1"></i>Sync to MS Outlook (iCal Feed)
+                                </button>
+                                <span id="ical_msg" class="text-success small ms-2" style="display:none;"><i class="fa-solid fa-circle-check me-1"></i>Copied to clipboard!</span>
+                            </div>
                         </div>
 
                         <!-- Right: Open Trades Notification -->
@@ -334,5 +341,22 @@ function get_current_on_call($department_id, $now) {
         </div>
     </div>
 </div>
+
+<script>
+function copyICalFeed(userId) {
+    const protocol = window.location.protocol === 'https:' ? 'webcal:' : 'http:';
+    const host = window.location.host;
+    const path = window.location.pathname.replace('index.php', '') + 'ical_feed.php?userid=' + userId;
+    const url = protocol + '//' + host + path;
+
+    navigator.clipboard.writeText(url).then(function() {
+        const msg = document.getElementById('ical_msg');
+        msg.style.display = 'inline';
+        setTimeout(function() {
+            msg.style.display = 'none';
+        }, 3000);
+    });
+}
+</script>
 
 <?php require_once 'footer.php'; ?>
