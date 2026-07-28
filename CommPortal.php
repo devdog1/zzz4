@@ -100,7 +100,7 @@ class CommPortal
             echo "[VERBOSE CommPortal] Logging in user: {$this->phoneNumber_}...\n";
         }
 
-        $URL = $this->baseURL_ . "login.html?version=9.5.40";
+        $URL = $this->baseURL_ . "login?version=9.5.40";
         $rest = new RestClient();
         $rest->endpoint = $URL;
         $postfields = [
@@ -113,9 +113,9 @@ class CommPortal
         $response = $rest->sendCurl();
 
         if ($response['http_code'] == 200) {
-            $tmp = explode("=", $response['body']);
+            $tmp = explode("=", trim($response['body']));
             if (isset($tmp[1])) {
-                $session = $tmp[1];
+                $session = trim($tmp[1]);
                 if (!empty($session)) {
                     $this->sessionID_ = $session;
                     $this->state_ = "loggedIn";
