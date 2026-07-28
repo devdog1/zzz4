@@ -275,13 +275,19 @@ function trigger_zabbix_user_group_update($usrgrp_id, $zabbix_userid) {
         'id' => 1
     ];
 
+    // For Zabbix 6.4, authentication can be supplied as a Bearer token or as "auth" param (deprecated but supported as backup)
     if (!empty($api_token)) {
         $payload['auth'] = $api_token;
     }
 
+    $headers = "Content-Type: application/json\r\n";
+    if (!empty($api_token)) {
+        $headers .= "Authorization: Bearer " . $api_token . "\r\n";
+    }
+
     $options = [
         'http' => [
-            'header'  => "Content-Type: application/json-rpc\r\n",
+            'header'  => $headers,
             'method'  => 'POST',
             'content' => json_encode($payload),
             'timeout' => 5
