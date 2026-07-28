@@ -70,7 +70,7 @@ class CommPortal
             $this->phoneNumber_ = $row['phone_number'] ?? '';
             $this->password_ = $row['password'] ?? '';
             $this->ext_ = $row['ext'] ?? '';
-            $this->phonesystem_ = 'wcg';
+            $this->phonesystem_ = 'commPortal';
             $this->login();
         } else {
             $this->ext_ = $row_or_ext;
@@ -100,7 +100,7 @@ class CommPortal
             echo "[VERBOSE CommPortal] Logging in user: {$this->phoneNumber_}...\n";
         }
 
-        $URL = $this->baseURL_ . "login?version=9.5.40";
+        $URL = $this->baseURL_ . "login.html?version=9.5.40";
         $rest = new RestClient();
         $rest->endpoint = $URL;
         $postfields = [
@@ -152,7 +152,7 @@ class CommPortal
             if ($row) {
                 $this->phoneNumber_ = $row['phone_number'];
                 $this->password_ = $row['password'];
-                $this->phonesystem_ = 'wcg';
+                $this->phonesystem_ = 'commPortal';
             } else {
                 $this->state_ = "Failed";
             }
