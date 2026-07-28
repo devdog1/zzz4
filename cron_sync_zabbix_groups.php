@@ -63,6 +63,16 @@ try {
 
                     $success = trigger_zabbix_user_group_update($usrgrp_id, $z_userid);
                     if ($success) {
+                        // DB log the change explicitly
+                        log_action('CRON_SYNC_ZABBIX_GROUP_MEMBER_CHANGED', [
+                            'department_id' => $dept_id,
+                            'department_name' => $dept['name'],
+                            'zabbix_usrgrp_id' => $usrgrp_id,
+                            'old_oncall_zabbix_userid' => $last_z_userid,
+                            'new_oncall_zabbix_userid' => $z_userid,
+                            'oncall_user_id' => $active_user['user_id']
+                        ]);
+
                         // Update cache
                         $up_stmt = $db->prepare("
                             UPDATE department_zabbix_groups
