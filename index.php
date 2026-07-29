@@ -102,10 +102,17 @@ function get_current_on_call($department_id, $now) {
                             <?php endif; ?>
 
                             <div class="mt-3">
-                                <button class="btn btn-xs btn-outline-primary" onclick="copyICalFeed('<?= $current_user_id ?>')" style="font-size: 0.75rem;">
-                                    <i class="fa-solid fa-calendar-plus me-1"></i>Sync to MS Outlook (iCal Feed)
-                                </button>
-                                <span id="ical_msg" class="text-success small ms-2" style="display:none;"><i class="fa-solid fa-circle-check me-1"></i>Copied to clipboard!</span>
+                                <label class="form-label small fw-semibold text-muted mb-1"><i class="fa-solid fa-calendar-plus me-1 text-primary"></i>Your Personal iCal Feed URL (for Outlook Sync):</label>
+                                <div class="input-group input-group-sm" style="max-width: 500px;">
+                                    <?php
+                                    $feed_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'webcal' : 'http') . '://' . $_SERVER['HTTP_HOST'] . str_replace('index.php', '', $_SERVER['PHP_SELF']) . 'ical_feed.php?userid=' . $current_user_id;
+                                    ?>
+                                    <input type="text" id="ical_url_input" class="form-control form-control-sm bg-white" value="<?= htmlspecialchars($feed_url) ?>" readonly>
+                                    <button class="btn btn-outline-primary btn-sm" onclick="copyICalInput()" type="button">
+                                        <i class="fa-solid fa-copy me-1"></i>Copy Link
+                                    </button>
+                                </div>
+                                <span id="ical_msg" class="text-success small mt-1" style="display:none;"><i class="fa-solid fa-circle-check me-1"></i>Copied to clipboard!</span>
                             </div>
                         </div>
 
@@ -343,15 +350,13 @@ function get_current_on_call($department_id, $now) {
 </div>
 
 <script>
-function copyICalFeed(userId) {
-    const protocol = window.location.protocol === 'https:' ? 'webcal:' : 'http:';
-    const host = window.location.host;
-    const path = window.location.pathname.replace('index.php', '') + 'ical_feed.php?userid=' + userId;
-    const url = protocol + '//' + host + path;
-
-    navigator.clipboard.writeText(url).then(function() {
+function copyICalInput() {
+    const copyText = document.getElementById("ical_url_input");
+    copyText.select();
+    copyText.setSelectionRange(0, 99999); // For mobile devices
+    navigator.clipboard.writeText(copyText.value).then(function() {
         const msg = document.getElementById('ical_msg');
-        msg.style.display = 'inline';
+        msg.style.display = 'inline-block';
         setTimeout(function() {
             msg.style.display = 'none';
         }, 3000);
