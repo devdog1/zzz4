@@ -753,8 +753,14 @@ function apply_noc_mode($segments, $department_id) {
 
         $current_time = $seg_start;
         while ($current_time < $seg_end) {
-            $day_start = strtotime('midnight', $current_time);
+            $date_str = date('Y-m-d', $current_time);
+            $day_start = strtotime($date_str . ' 00:00:00');
             $day_end = $day_start + 86400;
+
+            // Guarantee progress to prevent infinite loops
+            if ($day_end <= $current_time) {
+                $day_end = $current_time + 86400;
+            }
 
             $chunk_start = max($seg_start, $current_time);
             $chunk_end = min($seg_end, $day_end);
@@ -765,8 +771,8 @@ function apply_noc_mode($segments, $department_id) {
                 $h_start_str = $hours[$day_of_week]['start'];
                 $h_end_str = $hours[$day_of_week]['end'];
 
-                $noc_start = strtotime(date('Y-m-d', $chunk_start) . ' ' . $h_start_str);
-                $noc_end = strtotime(date('Y-m-d', $chunk_start) . ' ' . $h_end_str);
+                $noc_start = strtotime($date_str . ' ' . $h_start_str);
+                $noc_end = strtotime($date_str . ' ' . $h_end_str);
 
                 // Zone 1: Before NOC
                 $z1_s = $chunk_start;
