@@ -8,6 +8,8 @@ $all_users = get_all_users();
 $now = time();
 $now_str = date('Y-m-d H:i:s', $now);
 
+$current_user_id = $_SESSION['user_id'] ?? null;
+
 function get_current_on_call($department_id, $now) {
     $start_str = date('Y-m-d H:i:s', $now - 10);
     $end_str = date('Y-m-d H:i:s', $now + 10);
@@ -18,6 +20,34 @@ function get_current_on_call($department_id, $now) {
         }
     }
     return null;
+}
+
+// 1. Get user's next and upcoming shifts (past to 365 days in future)
+$my_next_shifts = [];
+if ($current_user_id) {
+    $end_of_year = date('Y-m-d H:i:s', $now + (365 * 24 * 3600));
+    $user_upcoming = get_final_schedule_for_user($current_user_id, $now_str, $end_of_year);
+    $my_next_shifts = array_slice($user_upcoming, 0, 3);
+}
+
+// 2. Get open trades available to them in their departments
+$available_trades_count = 0;
+if ($current_user_id) {
+    $db = get_oncall_db();
+    $stmt = $db->prepare("SELECT department_id FROM department_users WHERE user_id = ?");
+    $stmt->execute([$current_user_id]);
+    $my_depts = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    if (!empty($my_depts)) {
+        foreach ($my_depts as $d_id) {
+            $trades = get_trade_requests_by_department($d_id);
+            foreach ($trades as $t) {
+                if ($t['status'] === 'open' && $t['proposing_user_id'] != $current_user_id) {
+                    $available_trades_count++;
+                }
+            }
+        }
+    }
 }
 ?>
 
@@ -34,108 +64,15 @@ function get_current_on_call($department_id, $now) {
 <div class="row">
     <!-- Main Left Column: Departments Coverage -->
     <div class="col-lg-8">
-        <?php if ($current_user_id): ?>
-            <!-- Personalized User Panel -->
-            <?php
-            // 1. Get user's next and upcoming shifts
-            $end_of_year = date('Y-m-d H:i:s', $now + (365 * 24 * 3600));
-            $user_upcoming = get_final_schedule_for_user($current_user_id, $now_str, $end_of_year);
-            // Limit to next 3 shifts
-            $my_next_shifts = array_slice($user_upcoming, 0, 3);
 
-            // 2. Get open trades available to them in their departments
-            $db = get_oncall_db();
-            $stmt = $db->prepare("SELECT department_id FROM department_users WHERE user_id = ?");
-            $stmt->execute([$current_user_id]);
-            $my_depts = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-            $available_trades_count = 0;
-            if (!empty($my_depts)) {
-                foreach ($my_depts as $d_id) {
-                    $trades = get_trade_requests_by_department($d_id);
-                    foreach ($trades as $t) {
-                        // Open trade where user is NOT the proposer
-                        if ($t['status'] === 'open' && $t['proposing_user_id'] != $current_user_id) {
-                            $available_trades_count++;
-                        }
-                    }
-                }
-            }
-            ?>
-            <div class="card bg-light border-primary mb-4">
-                <div class="card-body">
-                    <div class="row">
-                        <!-- Left: Next Shifts -->
-                        <div class="col-md-7 border-end">
-                            <h4 class="h5 text-primary mb-3"><i class="fa-solid fa-calendar-check me-2"></i>Your Next On-Call Shifts</h4>
-                            <?php if (empty($my_next_shifts)): ?>
-                                <p class="text-muted small mb-0">You have no upcoming on-call shifts scheduled for the next 365 days.</p>
-                            <?php else: ?>
-                                <div class="table-responsive">
-                                    <table class="table table-sm table-hover mb-0 small">
-                                        <thead>
-                                            <tr class="text-muted">
-                                                <th>Department</th>
-                                                <th>Starts</th>
-                                                <th>Ends</th>
-                                                <th>Type</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <?php foreach ($my_next_shifts as $sh): ?>
-                                                <tr>
-                                                    <td class="fw-semibold"><?= htmlspecialchars($sh['department_name']) ?></td>
-                                                    <td><code><?= date('M d, H:i', $sh['start']) ?></code></td>
-                                                    <td><code><?= date('M d, H:i', $sh['end']) ?></code></td>
-                                                    <td>
-                                                        <?php if ($sh['is_override']): ?>
-                                                            <span class="badge bg-warning text-dark">Override</span>
-                                                        <?php else: ?>
-                                                            <span class="badge bg-light text-secondary">Rotation</span>
-                                                        <?php endif; ?>
-                                                    </td>
-                                                </tr>
-                                            <?php endforeach; ?>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            <?php endif; ?>
-
-                            <div class="mt-3">
-                                <label class="form-label small fw-semibold text-muted mb-1"><i class="fa-solid fa-calendar-plus me-1 text-primary"></i>Your Personal iCal Feed URL (for Outlook Sync):</label>
-                                <div class="input-group input-group-sm" style="max-width: 500px;">
-                                    <?php
-                                    $feed_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'webcal' : 'http') . '://' . $_SERVER['HTTP_HOST'] . str_replace('index.php', '', $_SERVER['PHP_SELF']) . 'ical_feed.php?userid=' . $current_user_id;
-                                    ?>
-                                    <input type="text" id="ical_url_input" class="form-control form-control-sm bg-white" value="<?= htmlspecialchars($feed_url) ?>" readonly>
-                                    <button class="btn btn-outline-primary btn-sm" onclick="copyICalInput()" type="button">
-                                        <i class="fa-solid fa-copy me-1"></i>Copy Link
-                                    </button>
-                                </div>
-                                <span id="ical_msg" class="text-success small mt-1" style="display:none;"><i class="fa-solid fa-circle-check me-1"></i>Copied to clipboard!</span>
-                            </div>
-                        </div>
-
-                        <!-- Right: Open Trades Notification -->
-                        <div class="col-md-5 ps-md-4 d-flex flex-column justify-content-center">
-                            <h4 class="h5 text-dark mb-2"><i class="fa-solid fa-right-left me-2"></i>Shift Trades</h4>
-                            <?php if ($available_trades_count > 0): ?>
-                                <div class="alert alert-info py-2 px-3 mb-0 small">
-                                    <i class="fa-solid fa-circle-info me-1"></i>
-                                    There <strong><?= $available_trades_count === 1 ? 'is 1 open shift' : "are {$available_trades_count} open shifts" ?></strong> available for trade in your groups!
-                                    <div class="text-end mt-2">
-                                        <a href="trades.php" class="btn btn-xs btn-primary font-weight-bold" style="font-size: 0.75rem;"><i class="fa-solid fa-arrow-right me-1"></i>Go to Trade Center</a>
-                                    </div>
-                                </div>
-                            <?php else: ?>
-                                <p class="text-muted small mb-0">There are no open shift trade requests in your departments right now.</p>
-                                <div class="text-end mt-2">
-                                    <a href="trades.php" class="text-decoration-none small"><i class="fa-solid fa-arrow-right me-1"></i>Propose a trade</a>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    </div>
+        <!-- Open Trades Notification Alert -->
+        <?php if ($current_user_id && $available_trades_count > 0): ?>
+            <div class="alert alert-info d-flex align-items-center justify-content-between mb-4 shadow-sm" role="alert">
+                <div>
+                    <i class="fa-solid fa-right-left me-2 fs-5"></i>
+                    There <?= $available_trades_count === 1 ? 'is <strong>1 open shift</strong>' : "are <strong>{$available_trades_count} open shifts</strong>" ?> available for trade in your departments!
                 </div>
+                <a href="trades.php" class="btn btn-sm btn-primary"><i class="fa-solid fa-arrow-right me-1"></i>Go to Trade Center</a>
             </div>
         <?php endif; ?>
 
@@ -268,47 +205,13 @@ function get_current_on_call($department_id, $now) {
 
     <!-- Sidebar Right Column: Stats & Quick Links -->
     <div class="col-lg-4">
-        <div class="card mb-4">
-            <div class="card-header bg-dark text-white">
-                <i class="fa-solid fa-chart-simple me-2"></i> System Statistics
-            </div>
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <span>Total Departments</span>
-                    <span class="badge bg-primary rounded-pill"><?= count($departments) ?></span>
-                </div>
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <span>Total Synced Users</span>
-                    <span class="badge bg-success rounded-pill"><?= count($all_users) ?></span>
-                </div>
-                <?php
-                // Fetch active overrides
-                $active_overrides_count = 0;
-                foreach ($departments as $dept) {
-                    $all_ovs = get_overrides($dept['id']);
-                    foreach ($all_ovs as $ov) {
-                        $ov_start = strtotime($ov['start_time']);
-                        $ov_end = strtotime($ov['end_time']);
-                        if ($now >= $ov_start && $now <= $ov_end) {
-                            $active_overrides_count++;
-                        }
-                    }
-                }
-                ?>
-                <div class="d-flex justify-content-between align-items-center">
-                    <span>Active Manual Overrides</span>
-                    <span class="badge bg-warning text-dark rounded-pill"><?= $active_overrides_count ?></span>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
+        <!-- Card 1: Quick Actions (Now with iCal sync) -->
+        <div class="card mb-4 shadow-sm border-primary">
             <div class="card-header bg-primary text-white">
                 <i class="fa-solid fa-bolt me-2"></i> Quick Actions
             </div>
-            <div class="list-group list-group-flush">
+            <div class="list-group list-group-flush border-bottom">
                 <?php
-                $current_user_id = $_SESSION['user_id'] ?? null;
                 $can_generate = false;
                 $can_override = false;
                 foreach ($departments as $d) {
@@ -344,6 +247,97 @@ function get_current_on_call($department_id, $now) {
                 <a href="calendar.php" class="list-group-item list-group-item-action">
                     <i class="fa-solid fa-calendar-days text-info me-2"></i> View Schedules Calendar
                 </a>
+            </div>
+            <?php if ($current_user_id): ?>
+                <div class="card-body bg-light">
+                    <label class="form-label small fw-semibold text-muted mb-1"><i class="fa-solid fa-calendar-plus me-1 text-primary"></i>Your Personal iCal Feed (Outlook):</label>
+                    <div class="input-group input-group-sm">
+                        <?php
+                        $feed_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'webcal' : 'http') . '://' . $_SERVER['HTTP_HOST'] . str_replace('index.php', '', $_SERVER['PHP_SELF']) . 'ical_feed.php?userid=' . $current_user_id;
+                        ?>
+                        <input type="text" id="ical_url_input" class="form-control form-control-sm bg-white" value="<?= htmlspecialchars($feed_url) ?>" readonly>
+                        <button class="btn btn-outline-primary btn-sm" onclick="copyICalInput()" type="button" title="Copy Feed Link">
+                            <i class="fa-solid fa-copy"></i>
+                        </button>
+                    </div>
+                    <span id="ical_msg" class="text-success small mt-1" style="display:none;"><i class="fa-solid fa-circle-check me-1"></i>Copied to clipboard!</span>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- Card 2: Upcoming Shifts Box (Directly below Quick Actions) -->
+        <?php if ($current_user_id): ?>
+            <div class="card mb-4 shadow-sm">
+                <div class="card-header bg-white fw-bold border-bottom">
+                    <i class="fa-solid fa-calendar-check me-2 text-primary"></i>Your Next On-Call Shifts
+                </div>
+                <div class="card-body p-0">
+                    <?php if (empty($my_next_shifts)): ?>
+                        <p class="text-muted small p-3 mb-0">You have no upcoming on-call shifts scheduled for the next 365 days.</p>
+                    <?php else: ?>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0 small">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Group</th>
+                                        <th>Starts</th>
+                                        <th>Type</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($my_next_shifts as $sh): ?>
+                                        <tr>
+                                            <td class="fw-semibold"><?= htmlspecialchars($sh['department_name']) ?></td>
+                                            <td><code><?= date('M d, H:i', $sh['start']) ?></code></td>
+                                            <td>
+                                                <?php if ($sh['is_override']): ?>
+                                                    <span class="badge bg-warning text-dark">Override</span>
+                                                <?php else: ?>
+                                                    <span class="badge bg-light text-secondary">Rotation</span>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <!-- Card 3: System Statistics -->
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-dark text-white">
+                <i class="fa-solid fa-chart-simple me-2"></i> System Statistics
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span>Total Departments</span>
+                    <span class="badge bg-primary rounded-pill"><?= count($departments) ?></span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span>Total Synced Users</span>
+                    <span class="badge bg-success rounded-pill"><?= count($all_users) ?></span>
+                </div>
+                <?php
+                // Fetch active overrides
+                $active_overrides_count = 0;
+                foreach ($departments as $dept) {
+                    $all_ovs = get_overrides($dept['id']);
+                    foreach ($all_ovs as $ov) {
+                        $ov_start = strtotime($ov['start_time']);
+                        $ov_end = strtotime($ov['end_time']);
+                        if ($now >= $ov_start && $now <= $ov_end) {
+                            $active_overrides_count++;
+                        }
+                    }
+                }
+                ?>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>Active Manual Overrides</span>
+                    <span class="badge bg-warning text-dark rounded-pill"><?= $active_overrides_count ?></span>
+                </div>
             </div>
         </div>
     </div>
