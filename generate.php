@@ -52,9 +52,23 @@ if (isset($_POST['generate'])) {
 
         $final_user_ids = array_column($ordered_members, 'user_id');
 
+        // Parse custom shifts template from input
+        $shifts_template = [];
+        $raw_shifts = $_POST['shift'] ?? [];
+        foreach ($raw_shifts as $s) {
+            if (!empty($s['start_time']) && !empty($s['end_time'])) {
+                $shifts_template[] = [
+                    'start_day' => (int)$s['start_day'],
+                    'start_time' => $s['start_time'],
+                    'end_day' => (int)$s['end_day'],
+                    'end_time' => $s['end_time']
+                ];
+            }
+        }
+
         try {
-            generate_365_day_schedule($dept_id, $final_user_ids, $start_date);
-            $message = "365-day on-call schedule generated successfully! 52 weekly shifts have been created starting from Monday at 5:00 PM of the selected week.";
+            generate_365_day_schedule($dept_id, $final_user_ids, $start_date, $shifts_template);
+            $message = "365-day on-call schedule generated successfully! 52 weeks of custom rotation shifts have been created starting from the week of the selected start date.";
         } catch (Exception $e) {
             $error = "Failed to generate schedule: " . $e->getMessage();
         }
@@ -132,12 +146,50 @@ if (isset($_POST['generate'])) {
                             <input type="hidden" name="department_id" value="<?= $dept_id ?>">
 
                             <div class="row mb-4">
-                                <div class="col-md-6">
-                                    <label for="start_date" class="form-label fw-semibold">Rotation Start Date</label>
+                                <div class="col-md-5 border-end">
+                                    <label for="start_date" class="form-label fw-semibold">Rotation Start Week (Monday)</label>
                                     <input type="date" class="form-control" name="start_date" id="start_date" value="<?= date('Y-m-d') ?>" required>
                                     <div class="form-text text-muted small">
-                                        The generation will find the Monday 5:00 PM shift corresponding to the week of this date.
+                                        The 52-week (365-day) schedule will align and start from the Monday of the selected date's week.
                                     </div>
+                                </div>
+                                <div class="col-md-7 ps-md-4">
+                                    <label class="form-label fw-semibold text-primary"><i class="fa-solid fa-clock me-1"></i>Weekly Shifts Template</label>
+                                    <div class="form-text text-muted small mb-2">Define 1 or more custom shifts per week. Rows with blank times will be ignored.</div>
+
+                                    <?php for ($s = 0; $s < 4; $s++): ?>
+                                        <div class="row g-1 align-items-center mb-1">
+                                            <div class="col-4">
+                                                <select name="shift[<?= $s ?>][start_day]" class="form-select form-select-sm">
+                                                    <option value="1" <?= $s == 0 ? 'selected' : '' ?>>Monday</option>
+                                                    <option value="2">Tuesday</option>
+                                                    <option value="3">Wednesday</option>
+                                                    <option value="4">Thursday</option>
+                                                    <option value="5">Friday</option>
+                                                    <option value="6">Saturday</option>
+                                                    <option value="7">Sunday</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-2">
+                                                <input type="time" name="shift[<?= $s ?>][start_time]" class="form-control form-control-sm" value="<?= $s == 0 ? '17:00' : '' ?>">
+                                            </div>
+                                            <div class="col-1 text-center small text-muted">to</div>
+                                            <div class="col-3">
+                                                <select name="shift[<?= $s ?>][end_day]" class="form-select form-select-sm">
+                                                    <option value="1" <?= $s == 0 ? 'selected' : '' ?>>Monday</option>
+                                                    <option value="2">Tuesday</option>
+                                                    <option value="3">Wednesday</option>
+                                                    <option value="4">Thursday</option>
+                                                    <option value="5">Friday</option>
+                                                    <option value="6">Saturday</option>
+                                                    <option value="7">Sunday</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-2">
+                                                <input type="time" name="shift[<?= $s ?>][end_time]" class="form-control form-control-sm" value="<?= $s == 0 ? '17:00' : '' ?>">
+                                            </div>
+                                        </div>
+                                    <?php endfor; ?>
                                 </div>
                             </div>
 

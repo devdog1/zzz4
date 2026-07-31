@@ -476,15 +476,28 @@ function save_department_users($department_id, $user_ids) {
 
 // --- SCHEDULE GENERATOR ---
 
-function generate_365_day_schedule($department_id, $user_ids, $start_date_str) {
+function generate_365_day_schedule($department_id, $user_ids, $start_date_str, $shifts_template = []) {
     $db = get_oncall_db();
 
     if (empty($user_ids)) {
         throw new Exception("No users selected for the rotation.");
     }
 
+    // Default to the baseline weekly shift (Monday 17:00 to next Monday 17:00) if no custom shifts specified
+    if (empty($shifts_template)) {
+        $shifts_template = [
+            [
+                'start_day' => 1, // Monday
+                'start_time' => '17:00',
+                'end_day' => 1, // Monday
+                'end_time' => '17:00'
+            ]
+        ];
+    }
+
     $startDateTime = new DateTime($start_date_str);
-    $startDateTime->setTime(17, 0, 0);
+    // Align startDateTime to Monday midnight
+    $startDateTime->setTime(0, 0, 0);
     if ($startDateTime->format('N') != 1) {
         $startDateTime->modify('last Monday');
     }
@@ -501,20 +514,46 @@ function generate_365_day_schedule($department_id, $user_ids, $start_date_str) {
 
         $num_users = count($user_ids);
         for ($week = 0; $week < 52; $week++) {
-            $shiftStart = clone $startDateTime;
-            $shiftStart->modify("+$week weeks");
-
-            $shiftEnd = clone $shiftStart;
-            $shiftEnd->modify("+1 week");
+            $week_monday = clone $startDateTime;
+            $week_monday->modify("+$week weeks");
 
             $user_id = $user_ids[$week % $num_users];
 
-            $stmt->execute([
-                $department_id,
-                $user_id,
-                $shiftStart->format('Y-m-d H:i:s'),
-                $shiftEnd->format('Y-m-d H:i:s')
-            ]);
+            foreach ($shifts_template as $shift) {
+                $start_day = (int)$shift['start_day'];
+                $start_time = $shift['start_time'];
+                $end_day = (int)$shift['end_day'];
+                $end_time = $shift['end_time'];
+
+                // Offsets (Monday = 0, ..., Sunday = 6)
+                $start_day_offset = $start_day - 1;
+                $end_day_offset = $end_day - 1;
+
+                // If end day of week is less than start day of week, it loops into the following week
+                if ($end_day_offset < $start_day_offset) {
+                    $end_day_offset += 7;
+                } elseif ($end_day_offset === $start_day_offset) {
+                    // If same day but end time is less than or equal to start time, it loops to the next day or following week
+                    if (strtotime('2000-01-01 ' . $end_time) <= strtotime('2000-01-01 ' . $start_time)) {
+                        $end_day_offset += 7;
+                    }
+                }
+
+                $shiftStart = clone $week_monday;
+                $shiftStart->modify("+$start_day_offset days");
+                $shiftStart->setTime((int)substr($start_time, 0, 2), (int)substr($start_time, 3, 2), 0);
+
+                $shiftEnd = clone $week_monday;
+                $shiftEnd->modify("+$end_day_offset days");
+                $shiftEnd->setTime((int)substr($end_time, 0, 2), (int)substr($end_time, 3, 2), 0);
+
+                $stmt->execute([
+                    $department_id,
+                    $user_id,
+                    $shiftStart->format('Y-m-d H:i:s'),
+                    $shiftEnd->format('Y-m-d H:i:s')
+                ]);
+            }
         }
 
         $db->commit();
@@ -523,7 +562,8 @@ function generate_365_day_schedule($department_id, $user_ids, $start_date_str) {
             'department_id' => $department_id,
             'start_date' => $startDateTime->format('Y-m-d H:i:s'),
             'weeks_generated' => 52,
-            'rotation_order' => $user_ids
+            'rotation_order' => $user_ids,
+            'shifts_template' => $shifts_template
         ]);
 
         return true;
