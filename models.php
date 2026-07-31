@@ -513,9 +513,21 @@ function generate_365_day_schedule($department_id, $user_ids, $start_date_str, $
         ");
 
         $num_users = count($user_ids);
+
+        // Find the maximum rotation order used in the template to determine the weekly advance multiplier
+        $max_order = 1;
+        foreach ($shifts_template as $shift) {
+            $r_order = isset($shift['rotation_order']) ? (int)$shift['rotation_order'] : 1;
+            if ($r_order > $max_order) {
+                $max_order = $r_order;
+            }
+        }
+
         for ($week = 0; $week < 52; $week++) {
             $week_monday = clone $startDateTime;
             $week_monday->modify("+$week weeks");
+
+            $week_base_idx = $week * $max_order;
 
             foreach ($shifts_template as $shift) {
                 $start_day = (int)$shift['start_day'];
@@ -546,8 +558,8 @@ function generate_365_day_schedule($department_id, $user_ids, $start_date_str, $
                 $shiftEnd->modify("+$end_day_offset days");
                 $shiftEnd->setTime((int)substr($end_time, 0, 2), (int)substr($end_time, 3, 2), 0);
 
-                // Rotate user based on the selected rotation order of this shift template
-                $user_idx = ($week + $rotation_order - 1) % $num_users;
+                // Rotate user based on continuous advance multiplier and current shift order
+                $user_idx = ($week_base_idx + $rotation_order - 1) % $num_users;
                 $user_id = $user_ids[$user_idx];
 
                 $stmt->execute([
