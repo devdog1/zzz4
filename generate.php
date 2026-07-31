@@ -61,7 +61,8 @@ if (isset($_POST['generate'])) {
                     'start_day' => (int)$s['start_day'],
                     'start_time' => $s['start_time'],
                     'end_day' => (int)$s['end_day'],
-                    'end_time' => $s['end_time']
+                    'end_time' => $s['end_time'],
+                    'rotation_order' => isset($s['rotation_order']) ? (int)$s['rotation_order'] : 1
                 ];
             }
         }
@@ -145,51 +146,79 @@ if (isset($_POST['generate'])) {
                         <form method="POST">
                             <input type="hidden" name="department_id" value="<?= $dept_id ?>">
 
-                            <div class="row mb-4">
-                                <div class="col-md-5 border-end">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
                                     <label for="start_date" class="form-label fw-semibold">Rotation Start Week (Monday)</label>
                                     <input type="date" class="form-control" name="start_date" id="start_date" value="<?= date('Y-m-d') ?>" required>
                                     <div class="form-text text-muted small">
                                         The 52-week (365-day) schedule will align and start from the Monday of the selected date's week.
                                     </div>
                                 </div>
-                                <div class="col-md-7 ps-md-4">
-                                    <label class="form-label fw-semibold text-primary"><i class="fa-solid fa-clock me-1"></i>Weekly Shifts Template</label>
-                                    <div class="form-text text-muted small mb-2">Define 1 or more custom shifts per week. Rows with blank times will be ignored.</div>
+                            </div>
 
-                                    <?php for ($s = 0; $s < 4; $s++): ?>
-                                        <div class="row g-1 align-items-center mb-1">
-                                            <div class="col-4">
-                                                <select name="shift[<?= $s ?>][start_day]" class="form-select form-select-sm">
-                                                    <option value="1" <?= $s == 0 ? 'selected' : '' ?>>Monday</option>
-                                                    <option value="2">Tuesday</option>
-                                                    <option value="3">Wednesday</option>
-                                                    <option value="4">Thursday</option>
-                                                    <option value="5">Friday</option>
-                                                    <option value="6">Saturday</option>
-                                                    <option value="7">Sunday</option>
-                                                </select>
-                                            </div>
-                                            <div class="col-2">
-                                                <input type="time" name="shift[<?= $s ?>][start_time]" class="form-control form-control-sm" value="<?= $s == 0 ? '17:00' : '' ?>">
-                                            </div>
-                                            <div class="col-1 text-center small text-muted">to</div>
-                                            <div class="col-3">
-                                                <select name="shift[<?= $s ?>][end_day]" class="form-select form-select-sm">
-                                                    <option value="1" <?= $s == 0 ? 'selected' : '' ?>>Monday</option>
-                                                    <option value="2">Tuesday</option>
-                                                    <option value="3">Wednesday</option>
-                                                    <option value="4">Thursday</option>
-                                                    <option value="5">Friday</option>
-                                                    <option value="6">Saturday</option>
-                                                    <option value="7">Sunday</option>
-                                                </select>
-                                            </div>
-                                            <div class="col-2">
-                                                <input type="time" name="shift[<?= $s ?>][end_time]" class="form-control form-control-sm" value="<?= $s == 0 ? '17:00' : '' ?>">
-                                            </div>
-                                        </div>
-                                    <?php endfor; ?>
+                            <div class="row mb-4">
+                                <div class="col-md-12">
+                                    <label class="form-label fw-semibold text-primary"><i class="fa-solid fa-clock me-1"></i>Weekly Shifts Template</label>
+                                    <div class="form-text text-muted small mb-3">Define 1 or more custom shifts per week. Specify which 'Rotation Order' (Offset) each shift template utilizes to allow different or same members to be assigned dynamically across the shifts. Rows with blank times will be ignored.</div>
+
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered align-middle">
+                                            <thead class="table-light text-muted small">
+                                                <tr>
+                                                    <th style="width: 22%;">Start Day</th>
+                                                    <th style="width: 20%;">Start Time</th>
+                                                    <th style="width: 4%;"></th>
+                                                    <th style="width: 22%;">End Day</th>
+                                                    <th style="width: 20%;">End Time</th>
+                                                    <th style="width: 12%;">Rotation Order</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php for ($s = 0; $s < 4; $s++): ?>
+                                                    <tr>
+                                                        <td>
+                                                            <select name="shift[<?= $s ?>][start_day]" class="form-select form-select-sm">
+                                                                <option value="1" <?= $s == 0 ? 'selected' : '' ?>>Monday</option>
+                                                                <option value="2">Tuesday</option>
+                                                                <option value="3">Wednesday</option>
+                                                                <option value="4">Thursday</option>
+                                                                <option value="5">Friday</option>
+                                                                <option value="6">Saturday</option>
+                                                                <option value="7">Sunday</option>
+                                                            </select>
+                                                        </td>
+                                                        <td>
+                                                            <input type="time" name="shift[<?= $s ?>][start_time]" class="form-control form-control-sm" value="<?= $s == 0 ? '17:00' : '' ?>" style="min-width: 130px;">
+                                                        </td>
+                                                        <td class="text-center small text-muted">to</td>
+                                                        <td>
+                                                            <select name="shift[<?= $s ?>][end_day]" class="form-select form-select-sm">
+                                                                <option value="1" <?= $s == 0 ? 'selected' : '' ?>>Monday</option>
+                                                                <option value="2">Tuesday</option>
+                                                                <option value="3">Wednesday</option>
+                                                                <option value="4">Thursday</option>
+                                                                <option value="5">Friday</option>
+                                                                <option value="6">Saturday</option>
+                                                                <option value="7">Sunday</option>
+                                                            </select>
+                                                        </td>
+                                                        <td>
+                                                            <input type="time" name="shift[<?= $s ?>][end_time]" class="form-control form-control-sm" value="<?= $s == 0 ? '17:00' : '' ?>" style="min-width: 130px;">
+                                                        </td>
+                                                        <td>
+                                                            <select name="shift[<?= $s ?>][rotation_order]" class="form-select form-select-sm">
+                                                                <option value="1" <?= $s == 0 ? 'selected' : '' ?>>Order 1</option>
+                                                                <option value="2" <?= $s == 1 ? 'selected' : '' ?>>Order 2</option>
+                                                                <option value="3" <?= $s == 2 ? 'selected' : '' ?>>Order 3</option>
+                                                                <option value="4" <?= $s == 3 ? 'selected' : '' ?>>Order 4</option>
+                                                                <option value="5">Order 5</option>
+                                                            </select>
+                                                        </td>
+                                                    </tr>
+                                                <?php endfor; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             </div>
 

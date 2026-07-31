@@ -517,13 +517,12 @@ function generate_365_day_schedule($department_id, $user_ids, $start_date_str, $
             $week_monday = clone $startDateTime;
             $week_monday->modify("+$week weeks");
 
-            $user_id = $user_ids[$week % $num_users];
-
             foreach ($shifts_template as $shift) {
                 $start_day = (int)$shift['start_day'];
                 $start_time = $shift['start_time'];
                 $end_day = (int)$shift['end_day'];
                 $end_time = $shift['end_time'];
+                $rotation_order = isset($shift['rotation_order']) ? (int)$shift['rotation_order'] : 1;
 
                 // Offsets (Monday = 0, ..., Sunday = 6)
                 $start_day_offset = $start_day - 1;
@@ -546,6 +545,10 @@ function generate_365_day_schedule($department_id, $user_ids, $start_date_str, $
                 $shiftEnd = clone $week_monday;
                 $shiftEnd->modify("+$end_day_offset days");
                 $shiftEnd->setTime((int)substr($end_time, 0, 2), (int)substr($end_time, 3, 2), 0);
+
+                // Rotate user based on the selected rotation order of this shift template
+                $user_idx = ($week + $rotation_order - 1) % $num_users;
+                $user_id = $user_ids[$user_idx];
 
                 $stmt->execute([
                     $department_id,
