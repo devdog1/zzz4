@@ -1,6 +1,6 @@
 <?php
-// test_schedule.php - Unit test for rotation calculations & override precedence
-require_once 'models.php';
+// test_schedule.php - Unit test for rotation calculations & override precedence in oncall-manager plugin
+require_once __DIR__ . '/plugins/oncall-manager/models/oncall-models.php';
 
 function run_tests() {
     echo "Running Schedule Calculation Logic Tests...\n";
@@ -11,12 +11,12 @@ function run_tests() {
 
     $base_slots = [
         [
+            'id' => 101,
             'start_time' => '2026-07-13 17:00:00',
             'end_time' => '2026-07-20 17:00:00',
             'user_id' => 1,
             'username' => 'alice',
-            'name' => 'Alice',
-            'surname' => 'Smith'
+            'display_name' => 'Alice Smith'
         ]
     ];
 
@@ -27,13 +27,12 @@ function run_tests() {
             'end_time' => '2026-07-16 14:00:00',
             'user_id' => 2,
             'username' => 'bob',
-            'name' => 'Bob',
-            'surname' => 'Jones',
+            'display_name' => 'Bob Jones',
             'description' => 'Sickness cover'
         ]
     ];
 
-    $segments = calculate_final_schedule($base_slots, $overrides);
+    $segments = oncall_calculate_final_schedule($base_slots, $overrides);
 
     // We expect 3 segments:
     // 1. Alice from 2026-07-13 17:00:00 to 2026-07-15 10:00:00

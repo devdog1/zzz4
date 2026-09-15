@@ -1,6 +1,10 @@
 <?php
 // config.php - Configuration for Azure SSO and Database
 
+if (!defined('APP_ROOT')) {
+    define('APP_ROOT', __DIR__);
+}
+
 return [
     'azure' => [
         'clientId'     => 'mock_client_id',
@@ -11,9 +15,9 @@ return [
     'db' => [
         'local' => [
             'dbhost' => '127.0.0.1',
-            'dbname' => 'oncall_system',
-            'dbuser' => 'oncall_user',
-            'dbpass' => 'oncall_pass',
+            'dbname' => 'base_framework',
+            'dbuser' => 'framework_user',
+            'dbpass' => 'framework_pass',
         ]
     ]
 ];

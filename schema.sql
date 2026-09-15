@@ -1,52 +1,15 @@
 -- schema.sql
--- Database initialization for On-Call Schedule System with RBAC, SSO, Audit Logs, and Trading
+-- Base Framework Database Initialization with RBAC, SSO, Settings, Audit Logs, and Plugin activation tracking.
 
--- 1. Create Zabbix Database & Mock Data
-CREATE DATABASE IF NOT EXISTS zabbix;
-USE zabbix;
+CREATE DATABASE IF NOT EXISTS base_framework;
+USE base_framework;
 
-CREATE TABLE IF NOT EXISTS users (
-    userid BIGINT NOT NULL PRIMARY KEY,
-    username VARCHAR(100) NOT NULL,
-    name VARCHAR(100) NOT NULL,
-    surname VARCHAR(100) NOT NULL
-);
-
-INSERT IGNORE INTO users (userid, username, name, surname) VALUES
-(1, 'alice', 'Alice', 'Smith'),
-(2, 'bob', 'Bob', 'Jones'),
-(3, 'charlie', 'Charlie', 'Brown'),
-(4, 'david', 'David', 'Miller'),
-(5, 'eve', 'Eve', 'Johnson'),
-(6, 'frank', 'Frank', 'Wright'),
-(7, 'grace', 'Grace', 'Davis');
-
-CREATE TABLE IF NOT EXISTS media (
-    mediaid BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    userid BIGINT NOT NULL,
-    mediatypeid BIGINT NOT NULL,
-    sendto VARCHAR(100) NOT NULL
-);
-
-INSERT IGNORE INTO media (userid, mediatypeid, sendto) VALUES
-(1, 4, '+1-555-0101'),
-(2, 4, '+1-555-0102'),
-(3, 4, '+1-555-0103'),
-(4, 3, 'pager_address'),
-(5, 4, '+1-555-0105');
-
--- 2. Create On-Call System Database & Schema
-CREATE DATABASE IF NOT EXISTS oncall_system;
-USE oncall_system;
-
+-- 1. Users Table
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    zabbix_userid BIGINT UNIQUE,
     username VARCHAR(100) NOT NULL UNIQUE,
-    name VARCHAR(100) NOT NULL,
-    surname VARCHAR(100) NOT NULL,
-    email VARCHAR(100),
-    phone VARCHAR(50),
+    email VARCHAR(100) NOT NULL,
+    phone VARCHAR(50) DEFAULT NULL,
     is_active TINYINT(1) DEFAULT 1,
     azure_oid VARCHAR(255) DEFAULT NULL UNIQUE,
     display_name VARCHAR(255) DEFAULT NULL,
@@ -56,55 +19,20 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS departments (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE,
-    manager_user_id INT DEFAULT NULL,
-    noc_mode TINYINT(1) DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS department_users (
-    department_id INT NOT NULL,
-    user_id INT NOT NULL,
-    PRIMARY KEY (department_id, user_id),
-    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS schedule_slots (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    department_id INT NOT NULL,
-    user_id INT NOT NULL,
-    start_time DATETIME NOT NULL,
-    end_time DATETIME NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_dept_time (department_id, start_time, end_time)
-);
-
-CREATE TABLE IF NOT EXISTS overrides (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    department_id INT NOT NULL,
-    user_id INT NOT NULL,
-    start_time DATETIME NOT NULL,
-    end_time DATETIME NOT NULL,
-    description VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_override_dept_time (department_id, start_time, end_time)
-);
-
--- RBAC Tables for AzureADSSO & Auth.php
+-- 2. RBAC Tables
 CREATE TABLE IF NOT EXISTS roles (
     id INT AUTO_INCREMENT PRIMARY KEY,
     role_name VARCHAR(50) NOT NULL UNIQUE,
     description VARCHAR(255),
+    is_active TINYINT(1) DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Seed Initial Roles & Basic Permissions
+INSERT IGNORE INTO roles (id, role_name, description) VALUES
+(1, 'admin', 'Global Administrator with full rights'),
+(2, 'manager', 'Manager with limited administrative rights'),
+(3, 'user', 'Standard user');
 
 CREATE TABLE IF NOT EXISTS permissions (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -158,25 +86,15 @@ CREATE TABLE IF NOT EXISTS denied_permissions (
     FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
 );
 
--- Shift Trades Table
-CREATE TABLE IF NOT EXISTS trade_requests (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    department_id INT NOT NULL,
-    proposing_user_id INT NOT NULL,
-    accepting_user_id INT DEFAULT NULL,
-    offered_slot_id INT NOT NULL,
-    counter_slot_id INT DEFAULT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'open', -- 'open', 'offered', 'agreed', 'approved', 'rejected'
+-- 3. Settings Table
+CREATE TABLE IF NOT EXISTS settings (
+    setting_key VARCHAR(100) NOT NULL PRIMARY KEY,
+    setting_value TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
-    FOREIGN KEY (proposing_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (accepting_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (offered_slot_id) REFERENCES schedule_slots(id) ON DELETE CASCADE,
-    FOREIGN KEY (counter_slot_id) REFERENCES schedule_slots(id) ON DELETE CASCADE
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Audit Logging Table
+-- 4. Audit Logging Table
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT DEFAULT NULL,
@@ -188,82 +106,66 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
--- Insert Roles & Basic Permissions
-INSERT IGNORE INTO roles (id, role_name, description) VALUES
-(1, 'admin', 'Global Administrator with full rights'),
-(2, 'manager', 'Department manager with schedule management rights'),
-(3, 'user', 'Standard user / team member');
+-- 5. Plugins Activation Table
+CREATE TABLE IF NOT EXISTS active_plugins (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    plugin_slug VARCHAR(100) NOT NULL UNIQUE,
+    activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. Task Scheduler Tracking Table with Dynamic Overrides and Enablement
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    task_key VARCHAR(150) NOT NULL PRIMARY KEY,
+    plugin_slug VARCHAR(100) NOT NULL,
+    interval_seconds INT NOT NULL,
+    is_enabled TINYINT(1) DEFAULT 1,
+    custom_interval_seconds INT DEFAULT NULL,
+    fixed_day_of_week INT DEFAULT NULL, -- 1=Monday, ..., 7=Sunday
+    fixed_time_of_day TIME DEFAULT NULL, -- HH:MM:SS
+    last_run DATETIME DEFAULT NULL,
+    next_run DATETIME DEFAULT NULL,
+    status VARCHAR(50) DEFAULT 'idle',
+    error_message TEXT DEFAULT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- 7. Task Scheduler Historical Execution Logs Table with duration column
+CREATE TABLE IF NOT EXISTS scheduled_tasks_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    task_key VARCHAR(150) NOT NULL,
+    run_started DATETIME NOT NULL,
+    run_ended DATETIME DEFAULT NULL,
+    status VARCHAR(50) NOT NULL, -- 'running', 'success', 'failed'
+    duration_seconds DECIMAL(10, 4) DEFAULT 0.0000,
+    error_message TEXT DEFAULT NULL,
+    FOREIGN KEY (task_key) REFERENCES scheduled_tasks(task_key) ON DELETE CASCADE
+);
+
+-- 8. User Dashboard Widget Preferences Table
+CREATE TABLE IF NOT EXISTS user_widget_preferences (
+    user_id INT NOT NULL,
+    widget_key VARCHAR(150) NOT NULL,
+    is_visible TINYINT(1) DEFAULT 1,
+    width_class VARCHAR(50) DEFAULT 'col-12', -- col-12, col-lg-8, col-lg-6, col-lg-4
+    sort_order INT DEFAULT 100,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, widget_key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 
 INSERT IGNORE INTO permissions (id, permission_name, description) VALUES
-(1, 'manage_departments', 'Create or delete departments'),
-(2, 'manage_schedules', 'Generate schedules and overrides'),
-(3, 'view_schedules', 'View calendar and on-call schedules');
+(1, 'manage_settings', 'Modify system and plugin settings'),
+(2, 'manage_plugins', 'Activate/Deactivate plugins'),
+(3, 'view_dashboard', 'Access the generic dashboard');
 
 INSERT IGNORE INTO role_permissions (role_id, permission_id) VALUES
 (1, 1), (1, 2), (1, 3),
-(2, 2), (2, 3),
+(2, 3),
 (3, 3);
 
 INSERT IGNORE INTO default_roles (role_id) VALUES (3);
 
--- Seed Initial Departments
-INSERT IGNORE INTO departments (id, name) VALUES
-(1, 'Infrastructure'),
-(2, 'Development'),
-(3, 'Security');
-
--- Seed NOC User in Users
-INSERT IGNORE INTO users (id, zabbix_userid, username, name, surname, email) VALUES
-(999, 999, 'noc@example.com', 'NOC', 'Service', 'noc@example.com');
-
--- Settings Table
-CREATE TABLE IF NOT EXISTS settings (
-    setting_key VARCHAR(100) NOT NULL PRIMARY KEY,
-    setting_value VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
+-- Seed Initial Settings
 INSERT IGNORE INTO settings (setting_key, setting_value) VALUES
-('zabbix_default_domain', 'example.com'),
-('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php'),
-('zabbix_api_token', 'mock_zabbix_api_token_value_here'),
-('noc_zabbix_userid', '999'),
-('commportal_base_url', 'https://endpoint/');
-
--- NOC Business Hours Table
-CREATE TABLE IF NOT EXISTS noc_business_hours (
-    day_of_week INT NOT NULL PRIMARY KEY, -- 1 = Monday, 2 = Tuesday, ..., 7 = Sunday
-    start_time TIME NOT NULL,
-    end_time TIME NOT NULL
-);
-
-INSERT IGNORE INTO noc_business_hours (day_of_week, start_time, end_time) VALUES
-(1, '08:00:00', '18:00:00'),
-(2, '08:00:00', '18:00:00'),
-(3, '08:00:00', '18:00:00'),
-(4, '08:00:00', '18:00:00'),
-(5, '08:00:00', '18:00:00'),
-(6, '08:00:00', '18:00:00'),
-(7, '08:00:00', '18:00:00');
-
--- Department Zabbix Groups Table
-CREATE TABLE IF NOT EXISTS department_zabbix_groups (
-    department_id INT NOT NULL,
-    zabbix_usrgrp_id BIGINT NOT NULL,
-    last_oncall_userid BIGINT DEFAULT NULL,
-    PRIMARY KEY (department_id, zabbix_usrgrp_id),
-    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
-);
-
--- CommPortal Accounts Table
-CREATE TABLE IF NOT EXISTS commportal_accounts (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    department_id INT NOT NULL,
-    phone_number VARCHAR(50) NOT NULL,
-    password VARCHAR(100) NOT NULL,
-    ext VARCHAR(20) DEFAULT NULL,
-    last_forwarded_phone VARCHAR(50) DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
-);
+('site_name', 'Framework Portal'),
+('azure_default_domain', 'example.com');
