@@ -1,12 +1,9 @@
 <?php
 // callback.php - Azure AD SSO Callback handler
-require_once 'Auth.php';
-
-$config = require 'config.php';
-$auth = new Auth($config);
+require_once __DIR__ . '/functions.php';
 
 try {
-    if ($auth->handleCallback()) {
+    if (get_auth()->handleCallback()) {
         header("Location: index.php");
         exit;
     } else {

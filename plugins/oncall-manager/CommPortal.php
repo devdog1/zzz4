@@ -63,7 +63,7 @@ class CommPortal
     // Overload constructor to support direct dynamic login credentials from Database!
     public function __construct($row_or_ext)
     {
-        $this->baseURL_ = get_setting('commportal_base_url', 'https://endpoint/');
+        $this->baseURL_ = oncall_get_setting('commportal_base_url', 'https://endpoint/');
 
         if (is_array($row_or_ext) || is_object($row_or_ext)) {
             $row = (array)$row_or_ext;
@@ -145,9 +145,9 @@ class CommPortal
     private function getLoginInfo()
     {
         try {
-            $db = get_oncall_db();
-            $stmt = $db->prepare("SELECT * FROM commportal_accounts WHERE ext = ? LIMIT 1");
-            $stmt->execute([$this->ext_]);
+            $pdb = oncall_get_pdb();
+            $tb_accounts = $pdb->getTableName('commportal_accounts');
+            $stmt = $pdb->query("SELECT * FROM {$tb_accounts} WHERE ext = ? LIMIT 1", [$this->ext_]);
             $row = $stmt->fetch();
             if ($row) {
                 $this->phoneNumber_ = $row['phone_number'];

@@ -1,361 +1,512 @@
 <?php
-// index.php - Dashboard
-require_once 'header.php';
-require_once 'models.php';
+// index.php - Streamlined Portal Dashboard Home Page
+require_once __DIR__ . '/functions.php';
 
-$departments = get_all_departments();
-$all_users = get_all_users();
-$now = time();
-$now_str = date('Y-m-d H:i:s', $now);
+// Redirect to login if user is not logged in
+require_login();
 
-$current_user_id = $_SESSION['user_id'] ?? null;
+// Check if we are executing a custom plugin route
+$route = $_GET['route'] ?? null;
+if ($route) {
+    // Buffer output so JSON/AJAX routes that call exit() can return raw JSON without HTML headers
+    ob_start();
+    $handled = $pluginManager->handleRoute($route);
+    $route_output = ob_get_clean();
 
-function get_current_on_call($department_id, $now) {
-    $start_str = date('Y-m-d H:i:s', $now - 10);
-    $end_str = date('Y-m-d H:i:s', $now + 10);
-    $segments = get_final_schedule_for_department($department_id, $start_str, $end_str);
-    foreach ($segments as $seg) {
-        if ($now >= $seg['start'] && $now <= $seg['end']) {
-            return $seg;
-        }
+    if ($handled) {
+        // If route completed normally (did not call exit for raw JSON), wrap in theme templates
+        require_once __DIR__ . '/header.php';
+        echo $route_output;
+        require_once __DIR__ . '/footer.php';
+        exit;
+    } else {
+        require_once __DIR__ . '/header.php';
+        echo '<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i> No plugin found matching route: ' . htmlspecialchars($route) . '</div>';
+        require_once __DIR__ . '/footer.php';
+        exit;
     }
-    return null;
 }
 
-// 1. Get user's next and upcoming shifts (past to 365 days in future)
-$my_next_shifts = [];
-if ($current_user_id) {
-    $end_of_year = date('Y-m-d H:i:s', $now + (365 * 24 * 3600));
-    $user_upcoming = get_final_schedule_for_user($current_user_id, $now_str, $end_of_year);
-    $my_next_shifts = array_slice($user_upcoming, 0, 3);
-}
+// Handle POST AJAX action to save dashboard widget preferences
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_widget_preferences') {
+    validate_csrf();
+    $user_id = $_SESSION['user_id'] ?? null;
+    if ($user_id) {
+        $prefs_json = $_POST['preferences'] ?? '[]';
+        $prefs = json_decode($prefs_json, true);
+        if (is_array($prefs)) {
+            foreach ($prefs as $index => $item) {
+                $widget_key = trim($item['widget_key'] ?? '');
+                $is_visible = !empty($item['is_visible']) ? 1 : 0;
+                $width_class = trim($item['width_class'] ?? 'col-12');
+                $sort_order = (int)($item['sort_order'] ?? (($index + 1) * 10));
 
-// 2. Get open trades available to them in their departments
-$available_trades_count = 0;
-if ($current_user_id) {
-    $db = get_oncall_db();
-    $stmt = $db->prepare("SELECT department_id FROM department_users WHERE user_id = ?");
-    $stmt->execute([$current_user_id]);
-    $my_depts = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-    if (!empty($my_depts)) {
-        foreach ($my_depts as $d_id) {
-            $trades = get_trade_requests_by_department($d_id);
-            foreach ($trades as $t) {
-                if ($t['status'] === 'open' && $t['proposing_user_id'] != $current_user_id) {
-                    $available_trades_count++;
+                if (!empty($widget_key)) {
+                    save_user_widget_preference($user_id, $widget_key, $is_visible, $width_class, $sort_order);
                 }
             }
+            log_action('SAVE_WIDGET_PREFERENCES', ['user_id' => $user_id]);
+            echo json_encode(['success' => true]);
+            exit;
         }
     }
+    echo json_encode(['success' => false, 'error' => 'Invalid session or payload']);
+    exit;
 }
+
+// Handle POST AJAX action to save system default dashboard layout (Admin only)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_default_widget_preferences') {
+    validate_csrf();
+    if (has_permission('manage_settings') || has_permission('manage_plugins')) {
+        $prefs_json = $_POST['preferences'] ?? '[]';
+        $prefs = json_decode($prefs_json, true);
+        if (is_array($prefs)) {
+            $formatted_defaults = [];
+            foreach ($prefs as $index => $item) {
+                $widget_key = trim($item['widget_key'] ?? '');
+                if (!empty($widget_key)) {
+                    $formatted_defaults[$widget_key] = [
+                        'widget_key' => $widget_key,
+                        'is_visible' => !empty($item['is_visible']) ? 1 : 0,
+                        'width_class' => trim($item['width_class'] ?? 'col-12'),
+                        'sort_order' => (int)($item['sort_order'] ?? (($index + 1) * 10))
+                    ];
+                }
+            }
+            set_setting('default_dashboard_layout', json_encode($formatted_defaults));
+            log_action('SAVE_DEFAULT_DASHBOARD_LAYOUT', ['admin_user_id' => $_SESSION['user_id'] ?? null]);
+            echo json_encode(['success' => true]);
+            exit;
+        }
+    }
+    echo json_encode(['success' => false, 'error' => 'Permission denied or invalid payload']);
+    exit;
+}
+
+// Handle Reset Preferences action
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reset_widget_preferences') {
+    validate_csrf();
+    $user_id = $_SESSION['user_id'] ?? null;
+    if ($user_id) {
+        $db = get_db_connection();
+        $stmt = $db->prepare("DELETE FROM user_widget_preferences WHERE user_id = ?");
+        $stmt->execute([$user_id]);
+        log_action('RESET_WIDGET_PREFERENCES', ['user_id' => $user_id]);
+        redirect('index.php');
+    }
+}
+
+// Render Core Dashboard Portal Screen
+require_once __DIR__ . '/header.php';
+
+$activePluginsList = $pluginManager->getActivePlugins();
+$activeCount = count($activePluginsList);
+$userId = $_SESSION['user_id'] ?? null;
+
+// Fetch current user details as dynamic widget context
+$currentUserContext = [
+    'id' => $userId,
+    'username' => $_SESSION['user']['email'] ?? '',
+    'display_name' => $_SESSION['user']['name'] ?? 'User',
+    'roles' => isset($_SESSION['roles']) ? array_keys($_SESSION['roles']) : [],
+    'permissions' => isset($_SESSION['permissions']) ? array_keys($_SESSION['permissions']) : []
+];
+
+// Fetch saved widget preferences for current user
+$userWidgetPrefs = $userId ? get_user_widget_preferences($userId) : [];
+
+// If user has no personal widget preferences saved, fallback to system default layout if set
+if (empty($userWidgetPrefs)) {
+    $defaultLayoutJson = get_setting('default_dashboard_layout', '{}');
+    $userWidgetPrefs = json_decode($defaultLayoutJson, true) ?: [];
+}
+
+// Capture HTML rendered by plugins on 'index_dashboard_widgets' hook
+ob_start();
+$pluginManager->doAction('index_dashboard_widgets', $currentUserContext);
+$widgets_raw_html = ob_get_clean();
 ?>
 
-<div class="row mb-4">
-    <div class="col-md-8">
-        <h1 class="h2"><i class="fa-solid fa-gauge-high text-primary me-2"></i>Dashboard</h1>
-        <p class="text-muted">Overview of active on-call assignments, coverage status, and upcoming rotations.</p>
+<div class="row mb-4 align-items-center text-start">
+    <div class="col-md-7">
+        <h1 class="h2"><i class="fa-solid fa-gauge-high text-primary me-2"></i>Core Dashboard</h1>
+        <p class="text-muted mb-0">Welcome to your Portal Homepage. Customize and reorder widgets to fit your workflow.</p>
     </div>
-    <div class="col-md-4 text-md-end align-self-center">
-        <span class="badge bg-secondary p-2"><i class="fa-solid fa-clock me-1"></i> Current Time: <?= date('Y-m-d H:i:s') ?></span>
+    <div class="col-md-5 text-md-end mt-3 mt-md-0 d-flex justify-content-md-end align-items-center gap-2">
+        <button type="button" id="toggleCustomizeBtn" class="btn btn-sm btn-outline-primary" onclick="toggleWidgetCustomizeMode()">
+            <i class="fa-solid fa-sliders me-1"></i><span id="customizeBtnText">Customize Dashboard</span>
+        </button>
+        <span class="badge bg-secondary p-2"><i class="fa-solid fa-clock me-1"></i> <?= date('Y-m-d H:i:s') ?></span>
     </div>
 </div>
 
-<div class="row">
-    <!-- Main Left Column: Departments Coverage -->
-    <div class="col-lg-8">
-
-        <!-- Open Trades Notification Alert -->
-        <?php if ($current_user_id && $available_trades_count > 0): ?>
-            <div class="alert alert-info d-flex align-items-center justify-content-between mb-4 shadow-sm" role="alert">
-                <div>
-                    <i class="fa-solid fa-right-left me-2 fs-5"></i>
-                    There <?= $available_trades_count === 1 ? 'is <strong>1 open shift</strong>' : "are <strong>{$available_trades_count} open shifts</strong>" ?> available for trade in your departments!
-                </div>
-                <a href="trades.php" class="btn btn-sm btn-primary"><i class="fa-solid fa-arrow-right me-1"></i>Go to Trade Center</a>
-            </div>
-        <?php endif; ?>
-
-        <h3 class="h4 mb-3"><i class="fa-solid fa-shield-halved me-2"></i>Department Live Coverage</h3>
-
-        <?php if (empty($departments)): ?>
-            <div class="alert alert-info">
-                <i class="fa-solid fa-info-circle me-1"></i> No departments created yet. Go to <a href="departments.php" class="alert-link">Departments</a> to add one!
-            </div>
-        <?php else: ?>
-            <?php foreach ($departments as $dept): ?>
-                <?php
-                $current = get_current_on_call($dept['id'], $now);
-                $is_override = $current && $current['is_override'];
-
-                // Fetch next 3 upcoming shifts in the next 30 days
-                $upcoming_start = date('Y-m-d H:i:s', $now);
-                $upcoming_end = date('Y-m-d H:i:s', $now + (30 * 24 * 3600));
-                $all_segments = get_final_schedule_for_department($dept['id'], $upcoming_start, $upcoming_end);
-
-                // Filter out current segment if any, or just take the first 3
-                $upcoming = [];
-                $count = 0;
-                foreach ($all_segments as $seg) {
-                    if ($current && $seg['start'] == $current['start'] && $seg['end'] == $current['end']) {
-                        continue;
-                    }
-                    if ($seg['end'] <= $now) {
-                        continue;
-                    }
-                    $upcoming[] = $seg;
-                    if (++$count >= 3) break;
-                }
-                ?>
-                <div class="card <?= $current ? ($is_override ? 'oncall-override' : 'oncall-active') : 'border-danger' ?> mb-4">
-                    <div class="card-body">
-                        <div class="row align-items-center">
-                            <div class="col-md-6">
-                                <h4 class="card-title mb-1 text-primary"><?= htmlspecialchars($dept['name']) ?></h4>
-                                <p class="text-muted mb-0">Active Coverage Status</p>
-                            </div>
-                            <div class="col-md-6 text-md-end">
-                                <?php if ($current): ?>
-                                    <?php if ($is_override): ?>
-                                        <span class="badge bg-warning text-dark p-2"><i class="fa-solid fa-circle-exclamation me-1"></i> Manual Override</span>
-                                    <?php else: ?>
-                                        <span class="badge bg-success p-2"><i class="fa-solid fa-circle-check me-1"></i> Normal Rotation</span>
-                                    <?php endif; ?>
-                                <?php else: ?>
-                                    <span class="badge bg-danger p-2"><i class="fa-solid fa-triangle-exclamation me-1"></i> NO ACTIVE COVERAGE</span>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-
-                        <hr class="my-3">
-
-                        <div class="row">
-                            <div class="col-md-6 border-end">
-                                <h5 class="h6 text-uppercase text-muted small">On-Call Person</h5>
-                                <?php if ($current): ?>
-                                    <div class="d-flex align-items-center mt-2">
-                                        <div class="bg-light rounded-circle p-3 text-center me-3" style="width: 50px; height: 50px;">
-                                            <i class="fa-solid fa-user text-secondary"></i>
-                                        </div>
-                                        <div>
-                                            <h5 class="mb-0 fw-bold"><?= htmlspecialchars($current['name'] . ' ' . $current['surname']) ?></h5>
-                                            <small class="text-muted">(@<?= htmlspecialchars($current['username']) ?>)</small>
-                                        </div>
-                                    </div>
-                                    <ul class="list-unstyled mt-3 mb-0 small text-muted">
-                                        <?php
-                                        $curr_user = get_user_by_id($current['user_id']);
-                                        $email_display = ($curr_user && $curr_user['email']) ? $curr_user['email'] : ($current['username'] . '@' . get_setting('zabbix_default_domain', 'example.com'));
-                                        ?>
-                                        <li><i class="fa-solid fa-envelope me-2"></i> <?= htmlspecialchars($email_display) ?></li>
-                                        <li><i class="fa-solid fa-calendar-day me-2"></i> Shift: <?= date('M d, H:i', $current['start']) ?> &rarr; <?= date('M d, H:i', $current['end']) ?></li>
-                                        <?php if ($is_override && !empty($current['description'])): ?>
-                                            <li class="text-warning"><i class="fa-solid fa-tag me-2"></i> Reason: <?= htmlspecialchars($current['description']) ?></li>
-                                        <?php endif; ?>
-                                    </ul>
-                                <?php else: ?>
-                                    <p class="text-danger mt-2 fw-semibold mb-0">No one is currently scheduled or on call for this department.</p>
-                                    <p class="small text-muted mb-0">Go to the Schedule Generator or Overrides to set up a rotation.</p>
-                                <?php endif; ?>
-                            </div>
-
-                            <div class="col-md-6 ps-md-4">
-                                <h5 class="h6 text-uppercase text-muted small">Upcoming Shifts</h5>
-                                <?php if (empty($upcoming)): ?>
-                                    <p class="text-muted small mt-2">No upcoming shifts scheduled for the next 30 days.</p>
-                                <?php else: ?>
-                                    <div class="table-responsive mt-2">
-                                        <table class="table table-sm table-borderless align-middle mb-0 small">
-                                            <thead>
-                                                <tr class="text-muted border-bottom">
-                                                    <th>User</th>
-                                                    <th>Starts</th>
-                                                    <th>Type</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <?php foreach ($upcoming as $up_seg): ?>
-                                                    <tr>
-                                                        <td class="fw-semibold text-dark">
-                                                            <?= htmlspecialchars($up_seg['name'] . ' ' . $up_seg['surname']) ?>
-                                                        </td>
-                                                        <td>
-                                                            <?= date('M d, H:i', $up_seg['start']) ?>
-                                                        </td>
-                                                        <td>
-                                                            <?php if ($up_seg['is_override']): ?>
-                                                                <span class="badge bg-warning text-dark">Override</span>
-                                                            <?php else: ?>
-                                                                <span class="badge bg-light text-secondary">Rotation</span>
-                                                            <?php endif; ?>
-                                                        </td>
-                                                    </tr>
-                                                <?php endforeach; ?>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            <?php endforeach; ?>
-        <?php endif; ?>
-    </div>
-
-    <!-- Sidebar Right Column: Stats & Quick Links -->
-    <div class="col-lg-4">
-        <!-- Card 1: Quick Actions (Now with iCal sync) -->
-        <div class="card mb-4 shadow-sm border-primary">
-            <div class="card-header bg-primary text-white">
-                <i class="fa-solid fa-bolt me-2"></i> Quick Actions
-            </div>
-            <div class="list-group list-group-flush border-bottom">
-                <?php
-                $can_generate = false;
-                $can_override = false;
-                foreach ($departments as $d) {
-                    if (can_manage_department($d['id'])) {
-                        $can_generate = true;
-                    }
-                    if (can_user_create_override($d['id'], $current_user_id)) {
-                        $can_override = true;
-                    }
-                }
-                ?>
-                <?php if ($can_generate): ?>
-                    <a href="generate.php" class="list-group-item list-group-item-action">
-                        <i class="fa-solid fa-calendar-plus text-primary me-2"></i> Generate 365-Day Schedule
-                    </a>
-                    <a href="commportal_mgmt.php" class="list-group-item list-group-item-action">
-                        <i class="fa-solid fa-phone text-info me-2"></i> CommPortal Telephony Sync
-                    </a>
-                <?php endif; ?>
-                <?php if ($can_override): ?>
-                    <a href="overrides.php?action=new" class="list-group-item list-group-item-action">
-                        <i class="fa-solid fa-clock-rotate-left text-warning me-2"></i> Create Manual Override
-                    </a>
-                <?php endif; ?>
-                <?php if (has_permission('manage_departments')): ?>
-                    <a href="sync.php" class="list-group-item list-group-item-action">
-                        <i class="fa-solid fa-arrows-rotate text-success me-2"></i> Sync Users from Zabbix
-                    </a>
-                    <a href="verify_db.php" class="list-group-item list-group-item-action">
-                        <i class="fa-solid fa-stethoscope text-primary me-2"></i> Database Diagnostics
-                    </a>
-                <?php endif; ?>
-                <a href="calendar.php" class="list-group-item list-group-item-action">
-                    <i class="fa-solid fa-calendar-days text-info me-2"></i> View Schedules Calendar
-                </a>
-            </div>
-            <?php if ($current_user_id): ?>
-                <div class="card-body bg-light">
-                    <label class="form-label small fw-semibold text-muted mb-1"><i class="fa-solid fa-calendar-plus me-1 text-primary"></i>Your Personal iCal Feed (Outlook):</label>
-                    <div class="input-group input-group-sm">
-                        <?php
-                        $feed_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'webcal' : 'http') . '://' . $_SERVER['HTTP_HOST'] . str_replace('index.php', '', $_SERVER['PHP_SELF']) . 'ical_feed.php?userid=' . $current_user_id;
-                        ?>
-                        <input type="text" id="ical_url_input" class="form-control form-control-sm bg-white" value="<?= htmlspecialchars($feed_url) ?>" readonly>
-                        <button class="btn btn-outline-primary btn-sm" onclick="copyICalInput()" type="button" title="Copy Feed Link">
-                            <i class="fa-solid fa-copy"></i>
-                        </button>
-                    </div>
-                    <span id="ical_msg" class="text-success small mt-1" style="display:none;"><i class="fa-solid fa-circle-check me-1"></i>Copied to clipboard!</span>
-                </div>
-            <?php endif; ?>
+<!-- Customization Control Toolbar (Hidden by default) -->
+<div id="customizeToolbar" class="card shadow-sm border-primary mb-4 text-start d-none">
+    <div class="card-body bg-light d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h6 class="fw-bold mb-1 text-primary"><i class="fa-solid fa-sliders me-2"></i>Dashboard Layout Customizer</h6>
+            <small class="text-muted">Use controls on each widget to change width, reorder position, or hide/show cards. New widgets default to showing.</small>
         </div>
+        <div class="d-flex gap-2">
+            <form method="POST" class="d-inline" onsubmit="return confirm('Reset dashboard layout to system default?');">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="reset_widget_preferences">
+                <button type="submit" class="btn btn-sm btn-outline-danger">
+                    <i class="fa-solid fa-rotate-left me-1"></i>Reset Defaults
+                </button>
+            </form>
+            <?php if (has_permission('manage_settings') || has_permission('manage_plugins')): ?>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="saveWidgetPreferences('save_default_widget_preferences')">
+                    <i class="fa-solid fa-sliders me-1"></i>Save as System Default
+                </button>
+            <?php endif; ?>
+            <button type="button" class="btn btn-sm btn-success" onclick="saveWidgetPreferences('save_widget_preferences')">
+                <i class="fa-solid fa-floppy-disk me-1"></i>Save My Layout
+            </button>
+        </div>
+    </div>
+</div>
 
-        <!-- Card 2: Upcoming Shifts Box (Directly below Quick Actions) -->
-        <?php if ($current_user_id): ?>
-            <div class="card mb-4 shadow-sm">
-                <div class="card-header bg-white fw-bold border-bottom">
-                    <i class="fa-solid fa-calendar-check me-2 text-primary"></i>Your Next On-Call Shifts
+<!-- Extensible Dashboard Widget Hook (Per-User Contextual Widgets) -->
+<div class="row mb-4" id="dashboardWidgetsContainer">
+    <?php
+    // Pure PHP Widget Parser (Does NOT require php-xml / DOMDocument extension)
+    if (!empty($widgets_raw_html)) {
+        $parsed_widgets = [];
+        $default_sort = 10;
+
+        // Iterate through all top-level <div ...> blocks outputted by any enabled plugin
+        $offset = 0;
+        $index = 0;
+        $len = strlen($widgets_raw_html);
+
+        while ($offset < $len) {
+            if (preg_match('/<div\b[^>]*>/i', $widgets_raw_html, $matches, PREG_OFFSET_CAPTURE, $offset) === 1) {
+                $tag_str = $matches[0][0];
+                $start_index = $matches[0][1];
+
+                // Extract or generate data-widget-key
+                $w_key = '';
+                if (preg_match('/data-widget-key=["\']([^"\']+)["\']/i', $tag_str, $km)) {
+                    $w_key = $km[1];
+                } else {
+                    $w_key = 'widget_' . ($index + 1);
+                }
+
+                // Extract or generate data-widget-title
+                $w_title = '';
+                if (preg_match('/data-widget-title=["\']([^"\']+)["\']/i', $tag_str, $tm)) {
+                    $w_title = $tm[1];
+                } else {
+                    $w_title = 'Dashboard Widget ' . ($index + 1);
+                }
+
+                // Find matching closing </div> by tracking nested <div> tag depth
+                $depth = 1;
+                $i = $start_index + strlen($tag_str);
+                $end_index = $len;
+
+                while ($i < $len) {
+                    if (substr($widgets_raw_html, $i, 4) === '<div') {
+                        $depth++;
+                        $i += 4;
+                    } elseif (substr($widgets_raw_html, $i, 6) === '</div>') {
+                        $depth--;
+                        if ($depth === 0) {
+                            $end_index = $i + 6;
+                            break;
+                        }
+                        $i += 6;
+                    } else {
+                        $i++;
+                    }
+                }
+
+                $widget_html = substr($widgets_raw_html, $start_index, $end_index - $start_index);
+
+                // Strip hardcoded outer grid col-* classes from plugin root div so it dynamically adopts resized width
+                $widget_html = preg_replace_callback('/^<div(\b[^>]*)\bclass=["\']([^"\']*)["\']/i', function($m) {
+                    $attrs = $m[1];
+                    $classes = $m[2];
+                    // Remove col-*, col-sm-*, col-md-*, col-lg-*, col-xl-* hardcoded grid classes
+                    $cleaned_classes = trim(preg_replace('/\bcol-(?:12|[1-9]|1[0-1])\b|\bcol-(?:sm|md|lg|xl|xxl)-(?:12|[1-9]|1[0-1])\b/i', '', $classes));
+                    // Ensure w-100 is present
+                    if (strpos($cleaned_classes, 'w-100') === false) {
+                        $cleaned_classes .= ' w-100';
+                    }
+                    return '<div' . $attrs . ' class="' . trim($cleaned_classes) . '"';
+                }, $widget_html, 1);
+
+                // Check saved user preference for this widget
+                $pref = $userWidgetPrefs[$w_key] ?? null;
+
+                // NEW widgets NOT present in saved preferences default to visible (1) and col-12
+                $is_visible = $pref ? (int)$pref['is_visible'] : 1;
+                $width_class = $pref ? $pref['width_class'] : 'col-12';
+                $sort_order = $pref ? (int)$pref['sort_order'] : ($default_sort + ($index * 10));
+
+                $parsed_widgets[] = [
+                    'key' => $w_key,
+                    'title' => $w_title,
+                    'is_visible' => $is_visible,
+                    'width_class' => $width_class,
+                    'sort_order' => $sort_order,
+                    'html' => $widget_html
+                ];
+
+                $offset = $end_index;
+                $index++;
+            } else {
+                break;
+            }
+        }
+
+        if (!empty($parsed_widgets)) {
+            // Sort parsed widgets by sort_order ASC
+            usort($parsed_widgets, function($a, $b) {
+                return $a['sort_order'] <=> $b['sort_order'];
+            });
+
+            // Render ordered widgets
+            foreach ($parsed_widgets as $pw) {
+                $display_style = ($pw['is_visible'] === 0) ? 'display: none !important;' : '';
+                ?>
+                <div class="widget-item <?= htmlspecialchars($pw['width_class']) ?> mb-4"
+                     data-widget-key="<?= htmlspecialchars($pw['key']) ?>"
+                     data-widget-title="<?= htmlspecialchars($pw['title']) ?>"
+                     data-sort-order="<?= $pw['sort_order'] ?>"
+                     data-is-visible="<?= $pw['is_visible'] ?>"
+                     data-width-class="<?= htmlspecialchars($pw['width_class']) ?>"
+                     style="<?= $display_style ?>">
+
+                    <!-- Widget Customization Overlay Bar (Shown in Customize Mode) -->
+                    <div class="widget-custombar card mb-2 border-primary bg-dark text-white d-none">
+                        <div class="card-body p-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-primary"><i class="fa-solid fa-up-down-left-right me-1"></i><?= htmlspecialchars($pw['title']) ?></span>
+                                <span class="badge bg-secondary visibility-badge"><?= $pw['is_visible'] ? 'Visible' : 'Hidden' ?></span>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <label class="small me-1 text-light">Width:</label>
+                                <select class="form-select form-select-sm width-selector" style="width: 140px;" onchange="updateWidgetWidth(this)">
+                                    <option value="col-12" <?= $pw['width_class'] === 'col-12' ? 'selected' : '' ?>>Full Width (12/12)</option>
+                                    <option value="col-lg-8" <?= $pw['width_class'] === 'col-lg-8' ? 'selected' : '' ?>>2/3 Width (8/12)</option>
+                                    <option value="col-lg-6" <?= $pw['width_class'] === 'col-lg-6' ? 'selected' : '' ?>>1/2 Width (6/12)</option>
+                                    <option value="col-lg-4" <?= $pw['width_class'] === 'col-lg-4' ? 'selected' : '' ?>>1/3 Width (4/12)</option>
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-light visibility-toggle-btn" onclick="toggleWidgetVisibility(this)" title="Toggle Show/Hide">
+                                    <i class="fa-solid <?= $pw['is_visible'] ? 'fa-eye-slash text-warning' : 'fa-eye text-success' ?>"></i>
+                                    <span><?= $pw['is_visible'] ? 'Hide' : 'Show' ?></span>
+                                </button>
+                                <div class="btn-group btn-group-sm">
+                                    <button type="button" class="btn btn-outline-light" onclick="moveWidgetUp(this)" title="Move Up"><i class="fa-solid fa-arrow-up"></i></button>
+                                    <button type="button" class="btn btn-outline-light" onclick="moveWidgetDown(this)" title="Move Down"><i class="fa-solid fa-arrow-down"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="widget-inner-content">
+                        <?= $pw['html'] ?>
+                    </div>
                 </div>
-                <div class="card-body p-0">
-                    <?php if (empty($my_next_shifts)): ?>
-                        <p class="text-muted small p-3 mb-0">You have no upcoming on-call shifts scheduled for the next 365 days.</p>
+                <?php
+            }
+        } else {
+            // Fallback if no widget-block class wrapper was parsed
+            echo $widgets_raw_html;
+        }
+    }
+    ?>
+</div>
+
+<?php if (has_permission('manage_plugins')): ?>
+    <div class="row text-start">
+        <!-- Active Plugins list panel -->
+        <div class="col-lg-8">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-dark text-white"><i class="fa-solid fa-puzzle-piece me-2"></i>Active Feature Modules</div>
+                <div class="card-body">
+                    <p class="small text-muted mb-3">All portal features are dynamically served by independent feature packages. Active modules are monitored below:</p>
+                    <?php if (empty($activePluginsList)): ?>
+                        <div class="alert alert-light border small text-center mb-0">No dynamic feature modules are currently enabled on your portal.</div>
                     <?php else: ?>
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover mb-0 small">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Group</th>
-                                        <th>Starts</th>
-                                        <th>Type</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($my_next_shifts as $sh): ?>
-                                        <tr>
-                                            <td class="fw-semibold"><?= htmlspecialchars($sh['department_name']) ?></td>
-                                            <td><code><?= date('M d, H:i', $sh['start']) ?></code></td>
-                                            <td>
-                                                <?php if ($sh['is_override']): ?>
-                                                    <span class="badge bg-warning text-dark">Override</span>
-                                                <?php else: ?>
-                                                    <span class="badge bg-light text-secondary">Rotation</span>
-                                                <?php endif; ?>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                        <div class="row">
+                            <?php foreach ($activePluginsList as $active_slug): ?>
+                                <div class="col-md-6 mb-3">
+                                    <div class="p-3 bg-light rounded border border-start border-3 border-success d-flex align-items-center justify-content-between">
+                                        <div>
+                                            <h6 class="fw-bold mb-0 text-dark"><?= htmlspecialchars(ucwords(str_replace('-', ' ', $active_slug))) ?></h6>
+                                            <small class="text-muted font-monospace">slug: <?= htmlspecialchars($active_slug) ?></small>
+                                        </div>
+                                        <span class="badge bg-success small"><i class="fa-solid fa-circle-check me-1"></i>Running</span>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
                         </div>
                     <?php endif; ?>
                 </div>
             </div>
-        <?php endif; ?>
+        </div>
 
-        <!-- Card 3: System Statistics -->
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-dark text-white">
-                <i class="fa-solid fa-chart-simple me-2"></i> System Statistics
-            </div>
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <span>Total Departments</span>
-                    <span class="badge bg-primary rounded-pill"><?= count($departments) ?></span>
+        <!-- Right Column: Quick Stats -->
+        <div class="col-lg-4">
+            <!-- Quick Stats -->
+            <div class="card mb-4 shadow-sm border-info">
+                <div class="card-header bg-info text-dark">
+                    <i class="fa-solid fa-chart-pie me-2"></i>System Quick Stats
                 </div>
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <span>Total Synced Users</span>
-                    <span class="badge bg-success rounded-pill"><?= count($all_users) ?></span>
-                </div>
-                <?php
-                // Fetch active overrides
-                $active_overrides_count = 0;
-                foreach ($departments as $dept) {
-                    $all_ovs = get_overrides($dept['id']);
-                    foreach ($all_ovs as $ov) {
-                        $ov_start = strtotime($ov['start_time']);
-                        $ov_end = strtotime($ov['end_time']);
-                        if ($now >= $ov_start && $now <= $ov_end) {
-                            $active_overrides_count++;
-                        }
-                    }
-                }
-                ?>
-                <div class="d-flex justify-content-between align-items-center">
-                    <span>Active Manual Overrides</span>
-                    <span class="badge bg-warning text-dark rounded-pill"><?= $active_overrides_count ?></span>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span>Registered Users</span>
+                        <span class="badge bg-secondary"><?= count(get_all_users()) ?></span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span>Active Modules</span>
+                        <span class="badge bg-success"><?= $activeCount ?></span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>Database Engine</span>
+                        <span class="badge bg-dark">MySQL/PDO</span>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
+<?php endif; ?>
 
 <script>
-function copyICalInput() {
-    const copyText = document.getElementById("ical_url_input");
-    copyText.select();
-    copyText.setSelectionRange(0, 99999); // For mobile devices
-    navigator.clipboard.writeText(copyText.value).then(function() {
-        const msg = document.getElementById('ical_msg');
-        msg.style.display = 'inline-block';
-        setTimeout(function() {
-            msg.style.display = 'none';
-        }, 3000);
+let customizeMode = false;
+
+function toggleWidgetCustomizeMode() {
+    customizeMode = !customizeMode;
+    const toolbar = document.getElementById('customizeToolbar');
+    const customBars = document.querySelectorAll('.widget-custombar');
+    const items = document.querySelectorAll('.widget-item');
+    const btnText = document.getElementById('customizeBtnText');
+
+    if (customizeMode) {
+        toolbar.classList.remove('d-none');
+        btnText.textContent = 'Exit Customizer Mode';
+        customBars.forEach(bar => bar.classList.remove('d-none'));
+
+        // Temporarily make hidden items semi-visible with opacity in customizer mode
+        items.forEach(item => {
+            if (item.getAttribute('data-is-visible') === '0') {
+                item.style.setProperty('display', 'block', 'important');
+                item.style.opacity = '0.5';
+            }
+        });
+    } else {
+        toolbar.classList.add('d-none');
+        btnText.textContent = 'Customize Dashboard';
+        customBars.forEach(bar => bar.classList.add('d-none'));
+
+        // Restore hidden status
+        items.forEach(item => {
+            if (item.getAttribute('data-is-visible') === '0') {
+                item.style.setProperty('display', 'none', 'important');
+                item.style.opacity = '1';
+            } else {
+                item.style.opacity = '1';
+            }
+        });
+    }
+}
+
+function updateWidgetWidth(selectElem) {
+    const item = selectElem.closest('.widget-item');
+    const newWidth = selectElem.value;
+
+    // Remove old col classes
+    item.classList.remove('col-12', 'col-lg-8', 'col-lg-6', 'col-lg-4');
+    item.classList.add(newWidth);
+    item.setAttribute('data-width-class', newWidth);
+}
+
+function toggleWidgetVisibility(btn) {
+    const item = btn.closest('.widget-item');
+    const currentVis = item.getAttribute('data-is-visible');
+    const badge = item.querySelector('.visibility-badge');
+    const icon = btn.querySelector('i');
+    const textSpan = btn.querySelector('span');
+
+    if (currentVis === '1') {
+        item.setAttribute('data-is-visible', '0');
+        badge.textContent = 'Hidden';
+        badge.className = 'badge bg-danger visibility-badge';
+        icon.className = 'fa-solid fa-eye text-success';
+        textSpan.textContent = 'Show';
+        if (customizeMode) {
+            item.style.opacity = '0.5';
+        }
+    } else {
+        item.setAttribute('data-is-visible', '1');
+        badge.textContent = 'Visible';
+        badge.className = 'badge bg-secondary visibility-badge';
+        icon.className = 'fa-solid fa-eye-slash text-warning';
+        textSpan.textContent = 'Hide';
+        item.style.opacity = '1';
+    }
+}
+
+function moveWidgetUp(btn) {
+    const item = btn.closest('.widget-item');
+    const prev = item.previousElementSibling;
+    if (prev && prev.classList.contains('widget-item')) {
+        item.parentNode.insertBefore(item, prev);
+    }
+}
+
+function moveWidgetDown(btn) {
+    const item = btn.closest('.widget-item');
+    const next = item.nextElementSibling;
+    if (next && next.classList.contains('widget-item')) {
+        item.parentNode.insertBefore(next, item);
+    }
+}
+
+function saveWidgetPreferences(actionType = 'save_widget_preferences') {
+    const container = document.getElementById('dashboardWidgetsContainer');
+    const items = container.querySelectorAll('.widget-item');
+    const preferences = [];
+
+    items.forEach((item, index) => {
+        preferences.push({
+            widget_key: item.getAttribute('data-widget-key'),
+            is_visible: parseInt(item.getAttribute('data-is-visible') || '1'),
+            width_class: item.getAttribute('data-width-class') || 'col-12',
+            sort_order: (index + 1) * 10
+        });
+    });
+
+    const csrfToken = '<?= get_csrf_token() ?>';
+
+    const formData = new FormData();
+    formData.append('action', actionType);
+    formData.append('csrf_token', csrfToken);
+    formData.append('preferences', JSON.stringify(preferences));
+
+    fetch('index.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const msg = (actionType === 'save_default_widget_preferences')
+                ? 'System default dashboard layout saved successfully!'
+                : 'Your personal dashboard layout saved successfully!';
+            alert(msg);
+            window.location.reload();
+        } else {
+            alert('Failed to save preferences: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        alert('Error communicating with server: ' + err);
     });
 }
 </script>
 
-<?php require_once 'footer.php'; ?>
+<?php require_once __DIR__ . '/footer.php'; ?>

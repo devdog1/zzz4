@@ -1,10 +1,6 @@
 <?php
 // login.php - Login selection (Azure AD)
-require_once 'models.php';
-require_once 'Auth.php';
-
-$config = require 'config.php';
-$auth = new Auth($config);
+require_once __DIR__ . '/functions.php';
 
 if (isset($_SESSION['user_id'])) {
     header("Location: index.php");
@@ -12,11 +8,12 @@ if (isset($_SESSION['user_id'])) {
 }
 
 $error = '';
+$site_name = get_setting('site_name', 'Framework Portal');
 
 // Handle real Azure AD login redirect
 if (isset($_POST['azure_login'])) {
     try {
-        $auth->login();
+        get_auth()->login();
     } catch (Exception $e) {
         $error = "Azure Login failed to initiate: " . $e->getMessage();
     }
@@ -26,7 +23,7 @@ if (isset($_POST['azure_login'])) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Login - On-Call Schedule Manager</title>
+    <title>Login - <?= htmlspecialchars($site_name) ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
     <style>
@@ -50,11 +47,11 @@ if (isset($_POST['azure_login'])) {
 
 <div class="card login-card p-4">
     <div class="text-center mb-4">
-        <div class="bg-primary text-white rounded-circle d-inline-flex p-3 mb-3">
-            <i class="fa-solid fa-clock-rotate-left fa-2x"></i>
+        <div class="bg-dark text-info rounded-circle d-inline-flex p-3 mb-3">
+            <i class="fa-solid fa-cubes fa-2x"></i>
         </div>
-        <h3 class="fw-bold text-dark">On-Call Schedule Manager</h3>
-        <p class="text-muted small">Please sign in to access schedules & trades</p>
+        <h3 class="fw-bold text-dark"><?= htmlspecialchars($site_name) ?></h3>
+        <p class="text-muted small">Sign in to access modules & features</p>
     </div>
 
     <?php if ($error): ?>
@@ -63,7 +60,7 @@ if (isset($_POST['azure_login'])) {
         </div>
     <?php endif; ?>
 
-    <!-- Real Azure Login -->
+    <!-- Azure SSO Login -->
     <form method="POST">
         <button type="submit" name="azure_login" class="btn btn-primary btn-lg w-100 d-flex align-items-center justify-content-center">
             <i class="fa-brands fa-microsoft me-2"></i> Sign in with Microsoft Azure

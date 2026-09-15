@@ -1,5 +1,7 @@
 <?php
-require_once 'AzureADSSO.php';
+// Auth.php - Robust Authentication & Dynamic RBAC Permission Engine
+require_once __DIR__ . '/AzureADSSO.php';
+require_once __DIR__ . '/db.php';
 
 class Auth
 {
@@ -19,21 +21,7 @@ class Auth
             $config['azure']['tenantId']
         );
 
-        $dsn = sprintf(
-            "mysql:host=%s;dbname=%s;charset=utf8mb4",
-            $config['db']['local']['dbhost'],
-            $config['db']['local']['dbname']
-        );
-
-        $this->db = new PDO(
-            $dsn,
-            $config['db']['local']['dbuser'],
-            $config['db']['local']['dbpass'],
-            [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-            ]
-        );
+        $this->db = get_db_connection();
     }
 
     /* =========================================================
@@ -66,23 +54,40 @@ class Auth
         $userInfo = $this->sso->getUserInfo($tokens['id_token']);
         $groups   = $this->sso->getUserGroups($tokens['access_token']);
 
-        $azureOid = $userInfo['sub'] ?? '';
+        $azureOid = $userInfo['oid'] ?? $userInfo['sub'] ?? '';
         $email    = $userInfo['preferred_username'] ?? '';
         $name     = $userInfo['name'] ?? '';
 
         $userId = $this->syncUser($azureOid, $email, $name);
+
+        $accessToken = $tokens['access_token'] ?? '';
+        $refreshToken = $tokens['refresh_token'] ?? null;
 
         $_SESSION['user_id'] = $userId;
         $_SESSION['user'] = [
             'azure_oid' => $azureOid,
             'email'     => $email,
             'name'      => $name,
-            'groups'    => $groups
+            'groups'    => $groups,
+            'access_token' => $accessToken,
+            'refresh_token' => $refreshToken
         ];
 
-        $_SESSION['roles'] = $this->getRoles($userId, $groups);
+        // Populate access_token and refresh_token across standard session locations for plugin / MS Teams compatibility
+        $_SESSION['access_token'] = $accessToken;
+        $_SESSION['azure_access_token'] = $accessToken;
+        if ($refreshToken) {
+            $_SESSION['refresh_token'] = $refreshToken;
+        }
+        if (!isset($_SESSION['tokens']) || !is_array($_SESSION['tokens'])) {
+            $_SESSION['tokens'] = [];
+        }
+        $_SESSION['tokens']['access_token'] = $accessToken;
+        if ($refreshToken) {
+            $_SESSION['tokens']['refresh_token'] = $refreshToken;
+        }
 
-        // DO NOT cache permissions only — always compute via DB
+        $_SESSION['roles'] = $this->getRoles($userId, $groups);
         $_SESSION['permissions'] = $this->getPermissions($userId, $groups);
 
         return true;
@@ -93,7 +98,7 @@ class Auth
      * ========================================================= */
     private function syncUser(string $azureOid, string $email, string $name): int
     {
-        // 1. Try to find user by azure_oid
+        // 1. Find user by azure_oid
         $stmt = $this->db->prepare("SELECT id FROM users WHERE azure_oid = ?");
         $stmt->execute([$azureOid]);
         $user = $stmt->fetch();
@@ -109,7 +114,7 @@ class Auth
             return (int)$user['id'];
         }
 
-        // 2. Try to find user by username (email) which might be pre-created by Zabbix sync
+        // 2. Find user by username (email)
         $stmt = $this->db->prepare("SELECT id FROM users WHERE username = ?");
         $stmt->execute([$email]);
         $user = $stmt->fetch();
@@ -125,7 +130,7 @@ class Auth
             return (int)$user['id'];
         }
 
-        // 3. Otherwise, auto-provision a new user
+        // 3. Otherwise, auto-provision
         $stmt = $this->db->prepare("
             INSERT INTO users (azure_oid, username, email, display_name, auto_provisioned, last_login)
             VALUES (?, ?, ?, ?, 1, NOW())
@@ -165,11 +170,12 @@ class Auth
     /* =========================================================
      * ROLES FROM AZURE + DB OVERRIDES
      * ========================================================= */
-    private function getRoles(int $userId, array $groups): array
+    public function getRoles(int $userId, array $groups = []): array
     {
         $roles = [];
 
         if (!empty($groups)) {
+            $groups = array_values(array_unique($groups));
             $in = implode(',', array_fill(0, count($groups), '?'));
 
             $stmt = $this->db->prepare("
@@ -177,6 +183,7 @@ class Auth
                 FROM azure_group_roles agr
                 JOIN roles r ON r.id = agr.role_id
                 WHERE agr.azure_group_name IN ($in)
+                  AND (r.is_active = 1 OR r.is_active IS NULL)
             ");
 
             $stmt->execute($groups);
@@ -186,12 +193,12 @@ class Auth
             }
         }
 
-        // user overrides
         $stmt = $this->db->prepare("
             SELECT r.role_name
             FROM user_roles ur
             JOIN roles r ON r.id = ur.role_id
             WHERE ur.user_id = ?
+              AND (r.is_active = 1 OR r.is_active IS NULL)
         ");
 
         $stmt->execute([$userId]);
@@ -204,15 +211,23 @@ class Auth
     }
 
     /* =========================================================
-     * FULL PERMISSION ENGINE (ROLE + USER + DENY)
+     * FULL PERMISSION ENGINE (ROLE + USER + DENY + ADMIN SUPERUSER)
      * ========================================================= */
-    public function getPermissions(int $userId, array $groups): array
+    public function getPermissions(int $userId, array $groups = []): array
     {
         $permissions = [];
+        $roles = $this->getRoles($userId, $groups);
 
-        /* -----------------------------
-         * ROLE-BASED PERMISSIONS
-         * ----------------------------- */
+        // SUPERUSER BYPASS: Admin role automatically possesses all registered permissions in system
+        if (isset($roles['admin'])) {
+            $all_perms = $this->db->query("SELECT permission_name FROM permissions")->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($all_perms as $p_name) {
+                $permissions[$p_name] = true;
+            }
+            return $permissions;
+        }
+
+        /* 1. ROLE-BASED PERMISSIONS */
         $sql = "
             SELECT p.permission_name
             FROM permissions p
@@ -220,6 +235,7 @@ class Auth
             JOIN roles r ON r.id = rp.role_id
             JOIN user_roles ur ON ur.role_id = r.id
             WHERE ur.user_id = ?
+              AND (r.is_active = 1 OR r.is_active IS NULL)
         ";
 
         $stmt = $this->db->prepare($sql);
@@ -229,18 +245,19 @@ class Auth
             $permissions[$row['permission_name']] = true;
         }
 
-        /* -----------------------------
-         * AZURE GROUP ROLE PERMISSIONS
-         * ----------------------------- */
+        /* 2. AZURE GROUP ROLE PERMISSIONS */
         if (!empty($groups)) {
+            $groups = array_values(array_unique($groups));
             $in = implode(',', array_fill(0, count($groups), '?'));
 
             $sql = "
                 SELECT p.permission_name
                 FROM permissions p
                 JOIN role_permissions rp ON rp.permission_id = p.id
-                JOIN azure_group_roles agr ON agr.role_id = rp.role_id
+                JOIN roles r ON r.id = rp.role_id
+                JOIN azure_group_roles agr ON agr.role_id = r.id
                 WHERE agr.azure_group_name IN ($in)
+                  AND (r.is_active = 1 OR r.is_active IS NULL)
             ";
 
             $stmt = $this->db->prepare($sql);
@@ -251,9 +268,7 @@ class Auth
             }
         }
 
-        /* -----------------------------
-         * USER DIRECT PERMISSIONS
-         * ----------------------------- */
+        /* 3. USER DIRECT PERMISSIONS */
         $stmt = $this->db->prepare("
             SELECT p.permission_name
             FROM user_permissions up
@@ -267,9 +282,7 @@ class Auth
             $permissions[$row['permission_name']] = true;
         }
 
-        /* -----------------------------
-         * DENIED PERMISSIONS (HIGHEST PRIORITY)
-         * ----------------------------- */
+        /* 4. DENIED PERMISSIONS (HIGHEST PRIORITY) */
         $stmt = $this->db->prepare("
             SELECT p.permission_name
             FROM denied_permissions dp
@@ -292,11 +305,9 @@ class Auth
     public function hasPermission(string $permission): bool
     {
         $userId = $_SESSION['user_id'] ?? null;
-
         if (!$userId) return false;
 
         $groups = $_SESSION['user']['groups'] ?? [];
-
         $permissions = $this->getPermissions($userId, $groups);
 
         return isset($permissions[$permission]);
@@ -305,6 +316,11 @@ class Auth
     public function hasRole(string $role): bool
     {
         return isset($_SESSION['roles'][$role]);
+    }
+
+    public function getSSO(): AzureADSSO
+    {
+        return $this->sso;
     }
 
     public function user(): ?array
@@ -320,90 +336,9 @@ class Auth
         }
     }
 
-    /* =========================================================
-     * LOGOUT
-     * ========================================================= */
     public function logout(): void
     {
         $_SESSION = [];
-
         session_destroy();
-    }
-
-    /* =========================================================
-     * ================= ADMIN FUNCTIONS =======================
-     * ========================================================= */
-
-    public function grantRole(int $userId, string $roleName): void
-    {
-        $stmt = $this->db->prepare("
-            INSERT IGNORE INTO user_roles (user_id, role_id)
-            SELECT ?, id FROM roles WHERE role_name = ?
-        ");
-        $stmt->execute([$userId, $roleName]);
-    }
-
-    public function revokeRole(int $userId, string $roleName): void
-    {
-        $stmt = $this->db->prepare("
-            DELETE ur FROM user_roles ur
-            JOIN roles r ON r.id = ur.role_id
-            WHERE ur.user_id = ? AND r.role_name = ?
-        ");
-        $stmt->execute([$userId, $roleName]);
-    }
-
-    public function grantPermission(int $userId, string $permission): void
-    {
-        $stmt = $this->db->prepare("
-            INSERT IGNORE INTO user_permissions (user_id, permission_id)
-            SELECT ?, id FROM permissions WHERE permission_name = ?
-        ");
-        $stmt->execute([$userId, $permission]);
-    }
-
-    public function denyPermission(int $userId, string $permission): void
-    {
-        $stmt = $this->db->prepare("
-            INSERT IGNORE INTO denied_permissions (user_id, permission_id)
-            SELECT ?, id FROM permissions WHERE permission_name = ?
-        ");
-        $stmt->execute([$userId, $permission]);
-    }
-
-    public function removeDeniedPermission(int $userId, string $permission): void
-    {
-        $stmt = $this->db->prepare("
-            DELETE dp FROM denied_permissions dp
-            JOIN permissions p ON p.id = dp.permission_id
-            WHERE dp.user_id = ? AND p.permission_name = ?
-        ");
-        $stmt->execute([$userId, $permission]);
-    }
-
-    public function getUserPermissions(int $userId): array
-    {
-        $stmt = $this->db->prepare("
-            SELECT p.permission_name
-            FROM user_permissions up
-            JOIN permissions p ON p.id = up.permission_id
-            WHERE up.user_id = ?
-        ");
-        $stmt->execute([$userId]);
-
-        return $stmt->fetchAll(PDO::FETCH_COLUMN);
-    }
-
-    public function getUserRoles(int $userId): array
-    {
-        $stmt = $this->db->prepare("
-            SELECT r.role_name
-            FROM user_roles ur
-            JOIN roles r ON r.id = ur.role_id
-            WHERE ur.user_id = ?
-        ");
-        $stmt->execute([$userId]);
-
-        return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 }
