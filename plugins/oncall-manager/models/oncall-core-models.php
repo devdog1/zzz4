@@ -169,3 +169,20 @@ function oncall_save_department_zabbix_groups($department_id, $zabbix_usrgrp_ids
     log_action('ONCALL_UPDATE_DEPT_ZABBIX_GROUPS', ['department_id' => $department_id, 'groups' => $zabbix_usrgrp_ids]);
     return true;
 }
+
+/* =========================================================
+ * UNIFIED ROTATION CHANGE SYNC (ZABBIX & COMMPORTAL)
+ * ========================================================= */
+
+function oncall_sync_rotation_changes($department_id = null) {
+    if (function_exists('oncall_sync_all_departments_zabbix_groups')) {
+        oncall_sync_all_departments_zabbix_groups();
+    }
+    if (function_exists('oncall_sync_commportal_background')) {
+        if ($department_id) {
+            oncall_sync_department_commportal_forwarding($department_id);
+        } else {
+            oncall_sync_commportal_background();
+        }
+    }
+}

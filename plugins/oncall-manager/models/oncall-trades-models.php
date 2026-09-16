@@ -163,6 +163,11 @@ function oncall_manager_approve_trade($trade_id) {
     $pdb->query("UPDATE {$tb_tr} SET status = 'approved' WHERE id = ?", [$trade_id]);
 
     log_action('ONCALL_APPROVE_TRADE', ['trade_id' => $trade_id]);
+
+    if (function_exists('oncall_sync_rotation_changes')) {
+        oncall_sync_rotation_changes($trade['department_id']);
+    }
+
     return true;
 }
 

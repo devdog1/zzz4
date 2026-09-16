@@ -73,6 +73,10 @@ function oncall_generate_365_day_schedule($department_id, $user_ids, $start_date
         'slots_created' => $inserted_count
     ]);
 
+    if (function_exists('oncall_sync_rotation_changes')) {
+        oncall_sync_rotation_changes($department_id);
+    }
+
     return $inserted_count;
 }
 
@@ -115,6 +119,11 @@ function oncall_create_override($department_id, $user_id, $start_time, $end_time
     $pdb->query($sql, [$department_id, $user_id, $start_time, $end_time, trim($description)]);
 
     log_action('ONCALL_CREATE_OVERRIDE', ['dept' => $department_id, 'user' => $user_id, 'start' => $start_time]);
+
+    if (function_exists('oncall_sync_rotation_changes')) {
+        oncall_sync_rotation_changes($department_id);
+    }
+
     return true;
 }
 
@@ -124,6 +133,11 @@ function oncall_delete_override($id) {
     $pdb->query("DELETE FROM {$tb_ovs} WHERE id = ?", [$id]);
 
     log_action('ONCALL_DELETE_OVERRIDE', ['id' => $id]);
+
+    if (function_exists('oncall_sync_rotation_changes')) {
+        oncall_sync_rotation_changes();
+    }
+
     return true;
 }
 
