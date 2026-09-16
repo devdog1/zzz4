@@ -81,3 +81,15 @@ CREATE TABLE IF NOT EXISTS plug_oncall_manager_department_zabbix_groups (
     last_oncall_userid BIGINT DEFAULT NULL,
     PRIMARY KEY (department_id, zabbix_usrgrp_id)
 );
+
+CREATE TABLE IF NOT EXISTS plug_oncall_manager_user_ical_tokens (
+    user_id INT NOT NULL PRIMARY KEY,
+    ical_token VARCHAR(64) NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS plug_oncall_manager_department_ical_tokens (
+    department_id INT NOT NULL PRIMARY KEY,
+    ical_token VARCHAR(64) NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

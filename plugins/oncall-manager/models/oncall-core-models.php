@@ -27,6 +27,135 @@ function oncall_can_manage_department($department_id) {
 }
 
 /* =========================================================
+ * ICAL PRIVATE UUID TOKEN HELPERS
+ * ========================================================= */
+
+function oncall_generate_uuid() {
+    $bytes = random_bytes(16);
+    $bytes[6] = chr(ord($bytes[6]) & 0x0f | 0x40); // Version 4
+    $bytes[8] = chr(ord($bytes[8]) & 0x3f | 0x80); // Variant RFC 4122
+    return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
+}
+
+function oncall_get_user_ical_token($user_id) {
+    if (!$user_id) return null;
+
+    try {
+        $pdb = oncall_get_pdb();
+        $tb_tok = $pdb->getTableName('user_ical_tokens');
+        $stmt = $pdb->query("SELECT ical_token FROM {$tb_tok} WHERE user_id = ?", [(int)$user_id]);
+        $row = $stmt->fetch();
+        if ($row && !empty($row['ical_token'])) {
+            return $row['ical_token'];
+        }
+
+        $token = oncall_generate_uuid();
+        $pdb->query("
+            INSERT INTO {$tb_tok} (user_id, ical_token)
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE ical_token = ?
+        ", [(int)$user_id, $token, $token]);
+
+        return $token;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+function oncall_get_department_ical_token($department_id) {
+    if (!$department_id) return null;
+
+    try {
+        $pdb = oncall_get_pdb();
+        $tb_tok = $pdb->getTableName('department_ical_tokens');
+        $stmt = $pdb->query("SELECT ical_token FROM {$tb_tok} WHERE department_id = ?", [(int)$department_id]);
+        $row = $stmt->fetch();
+        if ($row && !empty($row['ical_token'])) {
+            return $row['ical_token'];
+        }
+
+        $token = oncall_generate_uuid();
+        $pdb->query("
+            INSERT INTO {$tb_tok} (department_id, ical_token)
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE ical_token = ?
+        ", [(int)$department_id, $token, $token]);
+
+        return $token;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+function oncall_get_department_id_by_ical_token($token) {
+    if (empty($token)) return null;
+
+    try {
+        $pdb = oncall_get_pdb();
+        $tb_tok = $pdb->getTableName('department_ical_tokens');
+        $stmt = $pdb->query("SELECT department_id FROM {$tb_tok} WHERE ical_token = ?", [trim($token)]);
+        $row = $stmt->fetch();
+        return $row ? (int)$row['department_id'] : null;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+function oncall_regenerate_department_ical_token($department_id) {
+    if (!$department_id) return null;
+
+    try {
+        $pdb = oncall_get_pdb();
+        $tb_tok = $pdb->getTableName('department_ical_tokens');
+        $token = oncall_generate_uuid();
+        $pdb->query("
+            INSERT INTO {$tb_tok} (department_id, ical_token)
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE ical_token = ?
+        ", [(int)$department_id, $token, $token]);
+
+        log_action('ONCALL_REGENERATE_DEPT_ICAL_TOKEN', ['department_id' => $department_id]);
+        return $token;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+function oncall_get_user_id_by_ical_token($token) {
+    if (empty($token)) return null;
+
+    try {
+        $pdb = oncall_get_pdb();
+        $tb_tok = $pdb->getTableName('user_ical_tokens');
+        $stmt = $pdb->query("SELECT user_id FROM {$tb_tok} WHERE ical_token = ?", [trim($token)]);
+        $row = $stmt->fetch();
+        return $row ? (int)$row['user_id'] : null;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+function oncall_regenerate_user_ical_token($user_id) {
+    if (!$user_id) return null;
+
+    try {
+        $pdb = oncall_get_pdb();
+        $tb_tok = $pdb->getTableName('user_ical_tokens');
+        $token = oncall_generate_uuid();
+        $pdb->query("
+            INSERT INTO {$tb_tok} (user_id, ical_token)
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE ical_token = ?
+        ", [(int)$user_id, $token, $token]);
+
+        log_action('ONCALL_REGENERATE_ICAL_TOKEN', ['user_id' => $user_id]);
+        return $token;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+/* =========================================================
  * PLUGIN SPECIFIC SETTINGS API
  * ========================================================= */
 

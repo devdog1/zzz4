@@ -1,4 +1,6 @@
 -- uninstall.sql
+DROP TABLE IF EXISTS plug_oncall_manager_department_ical_tokens;
+DROP TABLE IF EXISTS plug_oncall_manager_user_ical_tokens;
 DROP TABLE IF EXISTS plug_oncall_manager_department_zabbix_groups;
 DROP TABLE IF EXISTS plug_oncall_manager_zabbix_user_map;
 DROP TABLE IF EXISTS plug_oncall_manager_settings;

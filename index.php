@@ -2,30 +2,32 @@
 // index.php - Streamlined Portal Dashboard Home Page
 require_once __DIR__ . '/functions.php';
 
-// Redirect to login if user is not logged in
-require_login();
-
-// Check if we are executing a custom plugin route
+// Check if we are executing a custom plugin route (handled before global login check to support public token/API endpoints)
 $route = $_GET['route'] ?? null;
 if ($route) {
-    // Buffer output so JSON/AJAX routes that call exit() can return raw JSON without HTML headers
+    // Buffer output so JSON/AJAX or feed routes that call exit() can return raw output without HTML headers
     ob_start();
     $handled = $pluginManager->handleRoute($route);
     $route_output = ob_get_clean();
 
     if ($handled) {
-        // If route completed normally (did not call exit for raw JSON), wrap in theme templates
+        // Require login for HTML-wrapped route output
+        require_login();
         require_once __DIR__ . '/header.php';
         echo $route_output;
         require_once __DIR__ . '/footer.php';
         exit;
     } else {
+        require_login();
         require_once __DIR__ . '/header.php';
         echo '<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i> No plugin found matching route: ' . htmlspecialchars($route) . '</div>';
         require_once __DIR__ . '/footer.php';
         exit;
     }
 }
+
+// Redirect to login if user is not logged in for core homepage
+require_login();
 
 // Handle POST AJAX action to save dashboard widget preferences
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_widget_preferences') {

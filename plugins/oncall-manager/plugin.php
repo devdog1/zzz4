@@ -372,31 +372,29 @@ add_action('register_routes', function() {
     });
 
     register_route('oncall_ical_feed', function() {
-        $user_id = isset($_GET['userid']) ? (int)$_GET['userid'] : (isset($_GET['user_id']) ? (int)$_GET['user_id'] : null);
-        if (!$user_id) {
-            header("HTTP/1.1 400 Bad Request");
-            echo "Error: Missing userid parameter.";
-            exit;
+        $token = $_GET['token'] ?? ($_GET['key'] ?? null);
+        $user_id = null;
+        $department_id = null;
+
+        if ($token) {
+            $user_id = oncall_get_user_id_by_ical_token($token);
+            if (!$user_id) {
+                $department_id = oncall_get_department_id_by_ical_token($token);
+            }
+        } elseif (isset($_GET['userid']) || isset($_GET['user_id'])) {
+            $user_id = (int)($_GET['userid'] ?? $_GET['user_id']);
+        } elseif (isset($_GET['department_id']) || isset($_GET['dept_id'])) {
+            $department_id = (int)($_GET['department_id'] ?? $_GET['dept_id']);
         }
 
-        $db = get_db_connection();
-        $stmt = $db->prepare("SELECT id, username, COALESCE(NULLIF(display_name, ''), username) AS display_name FROM users WHERE id = ?");
-        $stmt->execute([$user_id]);
-        $user = $stmt->fetch();
-
-        if (!$user) {
-            header("HTTP/1.1 404 Not Found");
-            echo "Error: User not found.";
+        if (!$user_id && !$department_id) {
+            header("HTTP/1.1 401 Unauthorized");
+            echo "Error: Invalid or missing private iCal subscription token.";
             exit;
         }
-
-        header('Content-Type: text/calendar; charset=utf-8');
-        header('Content-Disposition: inline; filename="oncall_schedule_' . $user_id . '.ics"');
 
         $start_str = date('Y-m-d H:i:s', time() - (60 * 24 * 3600));
         $end_str = date('Y-m-d H:i:s', time() + (365 * 24 * 3600));
-
-        $segments = oncall_get_final_schedule_for_user($user_id, $start_str, $end_str);
 
         $format_ical_utc = function($timestamp) {
             return gmdate('Ymd\THis\Z', $timestamp);
@@ -405,26 +403,77 @@ add_action('register_routes', function() {
             return date('Ymd\THis', $timestamp);
         };
 
-        echo "BEGIN:VCALENDAR\r\n";
-        echo "VERSION:2.0\r\n";
-        echo "PRODID:-//On-Call Schedule Manager//EN\r\n";
-        echo "CALSCALE:GREGORIAN\r\n";
-        echo "METHOD:PUBLISH\r\n";
-        echo "X-WR-CALNAME:On-Call Schedule - " . htmlspecialchars($user['display_name']) . "\r\n";
-        echo "X-WR-TIMEZONE:America/Winnipeg\r\n";
+        if ($user_id) {
+            $db = get_db_connection();
+            $stmt = $db->prepare("SELECT id, username, COALESCE(NULLIF(display_name, ''), username) AS display_name FROM users WHERE id = ?");
+            $stmt->execute([$user_id]);
+            $user = $stmt->fetch();
 
-        foreach ($segments as $seg) {
-            echo "BEGIN:VEVENT\r\n";
-            echo "UID:oncall_shift_" . $user_id . "_" . $seg['department_id'] . "_" . $seg['start'] . "@oncall_manager\r\n";
-            echo "DTSTAMP:" . $format_ical_utc(time()) . "\r\n";
-            echo "DTSTART;TZID=America/Winnipeg:" . $format_ical_local($seg['start']) . "\r\n";
-            echo "DTEND;TZID=America/Winnipeg:" . $format_ical_local($seg['end']) . "\r\n";
-            echo "SUMMARY:On-Call [" . htmlspecialchars($seg['department_name']) . "]\r\n";
-            echo "DESCRIPTION:On-call coverage duty for the " . htmlspecialchars($seg['department_name']) . " group. Type: " . ($seg['is_override'] ? 'Manual Override' : 'Normal Rotation') . ". Description: " . htmlspecialchars($seg['description']) . ".\r\n";
-            echo "END:VEVENT\r\n";
+            if (!$user) {
+                header("HTTP/1.1 404 Not Found");
+                echo "Error: User not found.";
+                exit;
+            }
+
+            header('Content-Type: text/calendar; charset=utf-8');
+            header('Content-Disposition: inline; filename="oncall_user_schedule_' . $user_id . '.ics"');
+
+            $segments = oncall_get_final_schedule_for_user($user_id, $start_str, $end_str);
+
+            echo "BEGIN:VCALENDAR\r\n";
+            echo "VERSION:2.0\r\n";
+            echo "PRODID:-//On-Call Schedule Manager//EN\r\n";
+            echo "CALSCALE:GREGORIAN\r\n";
+            echo "METHOD:PUBLISH\r\n";
+            echo "X-WR-CALNAME:On-Call Schedule - " . htmlspecialchars($user['display_name']) . "\r\n";
+            echo "X-WR-TIMEZONE:America/Winnipeg\r\n";
+
+            foreach ($segments as $seg) {
+                echo "BEGIN:VEVENT\r\n";
+                echo "UID:oncall_shift_user_" . $user_id . "_" . $seg['department_id'] . "_" . $seg['start'] . "@oncall_manager\r\n";
+                echo "DTSTAMP:" . $format_ical_utc(time()) . "\r\n";
+                echo "DTSTART;TZID=America/Winnipeg:" . $format_ical_local($seg['start']) . "\r\n";
+                echo "DTEND;TZID=America/Winnipeg:" . $format_ical_local($seg['end']) . "\r\n";
+                echo "SUMMARY:On-Call [" . htmlspecialchars($seg['department_name']) . "]\r\n";
+                echo "DESCRIPTION:On-call coverage duty for the " . htmlspecialchars($seg['department_name']) . " group. Type: " . ($seg['is_override'] ? 'Manual Override' : 'Normal Rotation') . ". Description: " . htmlspecialchars($seg['description']) . ".\r\n";
+                echo "END:VEVENT\r\n";
+            }
+            echo "END:VCALENDAR\r\n";
+            exit;
+        } else {
+            $dept = oncall_get_department_by_id($department_id);
+            if (!$dept) {
+                header("HTTP/1.1 404 Not Found");
+                echo "Error: Department not found.";
+                exit;
+            }
+
+            header('Content-Type: text/calendar; charset=utf-8');
+            header('Content-Disposition: inline; filename="oncall_team_schedule_' . $department_id . '.ics"');
+
+            $segments = oncall_get_final_schedule_for_department($department_id, $start_str, $end_str);
+
+            echo "BEGIN:VCALENDAR\r\n";
+            echo "VERSION:2.0\r\n";
+            echo "PRODID:-//On-Call Schedule Manager//EN\r\n";
+            echo "CALSCALE:GREGORIAN\r\n";
+            echo "METHOD:PUBLISH\r\n";
+            echo "X-WR-CALNAME:Team On-Call Schedule - " . htmlspecialchars($dept['name']) . "\r\n";
+            echo "X-WR-TIMEZONE:America/Winnipeg\r\n";
+
+            foreach ($segments as $seg) {
+                echo "BEGIN:VEVENT\r\n";
+                echo "UID:oncall_shift_dept_" . $department_id . "_" . $seg['start'] . "@oncall_manager\r\n";
+                echo "DTSTAMP:" . $format_ical_utc(time()) . "\r\n";
+                echo "DTSTART;TZID=America/Winnipeg:" . $format_ical_local($seg['start']) . "\r\n";
+                echo "DTEND;TZID=America/Winnipeg:" . $format_ical_local($seg['end']) . "\r\n";
+                echo "SUMMARY:" . htmlspecialchars($seg['display_name']) . " - On-Call [" . htmlspecialchars($dept['name']) . "]\r\n";
+                echo "DESCRIPTION:Assigned On-Call Person: " . htmlspecialchars($seg['display_name']) . " (" . htmlspecialchars($seg['username']) . "). Type: " . ($seg['is_override'] ? 'Manual Override' : 'Normal Rotation') . ". Reason: " . htmlspecialchars($seg['description']) . ".\r\n";
+                echo "END:VEVENT\r\n";
+            }
+            echo "END:VCALENDAR\r\n";
+            exit;
         }
-        echo "END:VCALENDAR\r\n";
-        exit;
     });
 
     register_route('oncall_api_events', function() {
