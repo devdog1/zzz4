@@ -413,3 +413,32 @@ function oncall_get_upcoming_user_shifts($user_id, $limit = 5) {
     ";
     return $pdb->query($sql, [$user_id, $limit])->fetchAll();
 }
+
+function oncall_get_final_schedule_for_user($user_id, $start_time_str, $end_time_str) {
+    $pdb = oncall_get_pdb();
+    $tb_du = $pdb->getTableName('department_users');
+
+    $depts = $pdb->query("SELECT department_id FROM {$tb_du} WHERE user_id = ?", [$user_id])->fetchAll();
+
+    $user_segments = [];
+    foreach ($depts as $dept) {
+        $dept_id = $dept['department_id'];
+        $dept_info = oncall_get_department_by_id($dept_id);
+        $dept_name = $dept_info ? $dept_info['name'] : 'Unknown';
+
+        $segments = oncall_get_final_schedule_for_department($dept_id, $start_time_str, $end_time_str);
+        foreach ($segments as $seg) {
+            if ($seg['user_id'] == $user_id) {
+                $seg['department_id'] = $dept_id;
+                $seg['department_name'] = $dept_name;
+                $user_segments[] = $seg;
+            }
+        }
+    }
+
+    usort($user_segments, function($a, $b) {
+        return $a['start'] <=> $b['start'];
+    });
+
+    return $user_segments;
+}

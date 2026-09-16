@@ -1,5 +1,6 @@
 <?php
 // PluginDatabase.php - Secure database isolation, safety mapping, and prefix wrapper for Plugins
+require_once __DIR__ . '/db.php';
 
 class PluginDatabase
 {
