@@ -54,18 +54,33 @@ function oncall_render_calendar_page() {
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         var calendarEl = document.getElementById('calendar');
+        if (!calendarEl) return;
+
         var calendar = new FullCalendar.Calendar(calendarEl, {
             initialView: 'dayGridMonth',
+            timeZone: 'local',
             headerToolbar: {
                 left: 'prev,next today',
                 center: 'title',
-                right: 'dayGridMonth,timeGridWeek,timeGridDay'
+                right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+            },
+            buttonText: {
+                today: 'Today',
+                month: 'Month',
+                week: 'Week',
+                day: 'Day',
+                list: 'List'
             },
             events: '<?php echo url_for('oncall_api_events') . '&department_id=' . (int)$selected_dept; ?>',
             eventDidMount: function(info) {
                 if (info.event.extendedProps.description) {
                     info.el.setAttribute('title', info.event.extendedProps.description);
                 }
+            },
+            eventTimeFormat: {
+                hour: '2-digit',
+                minute: '2-digit',
+                meridiem: 'short'
             }
         });
         calendar.render();
